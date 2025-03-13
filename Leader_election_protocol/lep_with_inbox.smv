@@ -1,0 +1,326 @@
+MODULE node(id, n, other_nodes_term, other_nodes_role, other_nodes_voted_for, is_active, action_type, action_node, message_target)
+-- Node in the Raft protocol
+VAR
+  -- Core Raft state
+  currentTerm : 0..5;
+  role : {follower, candidate, leader};
+  votedFor : -1..n-1; -- -1 means null (no vote)
+  timeout : boolean;
+  
+  -- Message inbox (simplified with fixed slots for different message types)
+  -- Each entry is (sender_id, term, msg_type, vote_granted)
+  -- msg_type: 0=vote_request, 1=vote_response, 2=heartbeat
+  inbox_sender : array 0..2 of -1..n-1;
+  inbox_term : array 0..2 of 0..5;
+  inbox_type : array 0..2 of 0..2;
+  inbox_vote_granted : array 0..2 of boolean;
+  
+  -- Vote counting
+  votes_received : 0..n;
+
+DEFINE
+  -- Constants
+  candidate_id := id;
+  -- Calculate majority threshold for votes
+  majority := n/2 + 1;
+  -- Check if we have enough votes to become leader
+  has_majority_votes := votes_received >= majority;
+
+ASSIGN
+  -- Initialize node state
+  init(currentTerm) := 0;
+  init(role) := follower;
+  init(votedFor) := -1;
+  init(timeout) := FALSE;
+  init(votes_received) := 0;
+  
+  -- Initialize inbox to empty (-1 sender means empty slot)
+  init(inbox_sender[0]) := -1;
+  init(inbox_sender[1]) := -1;
+  init(inbox_sender[2]) := -1;
+  init(inbox_term[0]) := 0;
+  init(inbox_term[1]) := 0;
+  init(inbox_term[2]) := 0;
+  init(inbox_type[0]) := 0;
+  init(inbox_type[1]) := 0;
+  init(inbox_type[2]) := 0;
+  init(inbox_vote_granted[0]) := FALSE;
+  init(inbox_vote_granted[1]) := FALSE;
+  init(inbox_vote_granted[2]) := FALSE;
+  
+  -- Term transitions based on actions and messages
+  next(currentTerm) :=
+    case
+      -- Become candidate (increase term)
+      is_active & action_type = become_candidate & role = follower & timeout : 
+        min(currentTerm + 1, 5);
+      
+      -- Term update from incoming messages (any higher term)
+      is_active & action_type = process_message &
+      inbox_sender[0] != -1 & inbox_term[0] > currentTerm : 
+        inbox_term[0];
+      
+      TRUE : currentTerm;
+    esac;
+
+  -- Role transitions
+  next(role) :=
+    case
+      -- Follower becomes candidate on timeout
+      is_active & action_type = become_candidate & role = follower & timeout : 
+        candidate;
+      
+      -- Candidate becomes leader when receiving majority
+      is_active & action_type = become_leader & role = candidate & has_majority_votes : 
+        leader;
+      
+      -- Any role reverts to follower when seeing higher term
+      is_active & action_type = process_message &
+      inbox_sender[0] != -1 & inbox_term[0] > currentTerm : 
+        follower;
+      
+      -- Leader/candidate reverts to follower when processing heartbeat with current term
+      is_active & action_type = process_message &
+      inbox_sender[0] != -1 & inbox_type[0] = 2 & 
+      inbox_term[0] = currentTerm & role != follower : 
+        follower;
+      
+      TRUE : role;
+    esac;
+    
+  -- Voting record
+  next(votedFor) :=
+    case
+      -- Reset vote when term changes
+      next(currentTerm) > currentTerm : -1;
+      
+      -- Vote for self when becoming candidate
+      is_active & action_type = become_candidate & role = follower & timeout : 
+        id;
+      
+      -- Vote for other node when processing vote request
+      is_active & action_type = process_message &
+      inbox_sender[0] != -1 & inbox_type[0] = 0 & 
+      (votedFor = -1 | votedFor = inbox_sender[0]) &
+      inbox_term[0] >= currentTerm : 
+        inbox_sender[0];
+      
+      TRUE : votedFor;
+    esac;
+    
+  -- Timeout management  
+  next(timeout) :=
+    case
+      -- Reset timeout on becoming candidate or leader
+      next(role) = candidate | next(role) = leader : FALSE;
+      
+      -- Reset timeout when receiving valid heartbeat
+      is_active & action_type = process_message &
+      inbox_sender[0] != -1 & inbox_type[0] = 2 & 
+      inbox_term[0] >= currentTerm : 
+        FALSE;
+      
+      -- Set timeout randomly for followers
+      is_active & action_type = trigger_timeout & role = follower : 
+        TRUE;
+      
+      TRUE : timeout;
+    esac;
+    
+  -- Vote counting
+  next(votes_received) :=
+    case
+      -- Reset votes when becoming candidate
+      is_active & action_type = become_candidate & role = follower & timeout : 
+        1; -- Vote for self
+      
+      -- Increment votes when processing vote responses
+      is_active & action_type = process_message &
+      inbox_sender[0] != -1 & inbox_type[0] = 1 & 
+      inbox_vote_granted & currentTerm = inbox_term[0] : 
+        min(votes_received + 1, n);
+      
+      -- Reset votes when no longer candidate
+      next(role) != candidate : 0;
+      
+      TRUE : votes_received;
+    esac;
+    
+  -- Message processing - First inbox slot
+  -- This simulates consuming a message from the inbox
+  next(inbox_sender[0]) :=
+    case
+      -- Process the message (remove it)
+      is_active & action_type = process_message & inbox_sender[0] != -1 : 
+        -1;
+      
+      -- Receive vote request
+      !is_active & action_type = request_vote & message_target = id : 
+        action_node;
+      
+      -- Receive vote response
+      !is_active & action_type = respond_to_vote & message_target = id : 
+        action_node;
+      
+      -- Receive heartbeat
+      !is_active & action_type = send_heartbeat & message_target = id : 
+        action_node;
+      
+      -- Network failure - message might be lost (non-deterministic)
+      !is_active & (action_type = request_vote | action_type = respond_to_vote | 
+                   action_type = send_heartbeat) & message_target = id : 
+        {action_node, -1}; -- Either deliver or lose message
+      
+      TRUE : inbox_sender[0];
+    esac;
+    
+  next(inbox_term[0]) :=
+    case
+      -- Process the message (reset term)
+      is_active & action_type = process_message & inbox_sender[0] != -1 : 
+        0;
+      
+      -- Term for vote request
+      !is_active & action_type = request_vote & message_target = id & next(inbox_sender[0]) != -1 : 
+        other_nodes_term[action_node];
+      
+      -- Term for vote response
+      !is_active & action_type = respond_to_vote & message_target = id & next(inbox_sender[0]) != -1 : 
+        other_nodes_term[action_node];
+      
+      -- Term for heartbeat
+      !is_active & action_type = send_heartbeat & message_target = id & next(inbox_sender[0]) != -1 : 
+        other_nodes_term[action_node];
+      
+      TRUE : inbox_term[0];
+    esac;
+    
+  next(inbox_type[0]) :=
+    case
+      -- Process the message (reset type)
+      is_active & action_type = process_message & inbox_sender[0] != -1 : 
+        0;
+      
+      -- Type for vote request
+      !is_active & action_type = request_vote & message_target = id & next(inbox_sender[0]) != -1 : 
+        0;
+      
+      -- Type for vote response
+      !is_active & action_type = respond_to_vote & message_target = id & next(inbox_sender[0]) != -1 : 
+        1;
+      
+      -- Type for heartbeat
+      !is_active & action_type = send_heartbeat & message_target = id & next(inbox_sender[0]) != -1 : 
+        2;
+      
+      TRUE : inbox_type[0];
+    esac;
+    
+  next(inbox_vote_granted[0]) :=
+    case
+      -- Process the message (reset vote grant)
+      is_active & action_type = process_message & inbox_sender[0] != -1 : 
+        FALSE;
+      
+      -- Vote grant decision on responding to vote
+      !is_active & action_type = respond_to_vote & message_target = id & next(inbox_sender[0]) != -1 : 
+        -- Grant vote if term is higher or equal AND haven't voted yet (or voted for same node)
+        other_nodes_term[action_node] >= currentTerm & 
+        (votedFor = -1 | votedFor = action_node);
+      
+      TRUE : inbox_vote_granted[0];
+    esac;
+
+MODULE main
+-- Main module orchestrating the Raft system
+DEFINE
+  n := 3; -- Number of nodes
+
+VAR
+  -- Create individual node instances 
+  node0 : node(0, n, current_terms, roles, votes, FALSE, action_type, active_node, message_target);
+  node1 : node(1, n, current_terms, roles, votes, FALSE, action_type, active_node, message_target);
+  node2 : node(2, n, current_terms, roles, votes, FALSE, action_type, active_node, message_target);
+  
+  -- Flattened arrays to track node state
+  current_terms : array 0..n-1 of 0..5;
+  roles : array 0..n-1 of {follower, candidate, leader};
+  votes : array 0..n-1 of -1..n-1;
+  
+  -- Global action selection
+  active_node : 0..n-1;
+  action_type : {request_vote, respond_to_vote, send_heartbeat, process_message, 
+                 become_candidate, become_leader, trigger_timeout, none};
+  message_target : 0..n-1; -- Target node for messages
+  
+  -- Clock for fairness
+  clock : 0..n-1;
+
+ASSIGN
+  -- Keep flattened arrays in sync with actual node state
+  current_terms[0] := node0.currentTerm;
+  current_terms[1] := node1.currentTerm;
+  current_terms[2] := node2.currentTerm;
+  
+  roles[0] := node0.role;
+  roles[1] := node1.role;
+  roles[2] := node2.role;
+  
+  votes[0] := node0.votedFor;
+  votes[1] := node1.votedFor;
+  votes[2] := node2.votedFor;
+  
+  -- Initialize clock
+  init(clock) := 0;
+  next(clock) := (clock + 1) mod n;
+  
+  -- Non-deterministic choices with some constraints
+  next(active_node) := clock; -- Ensure round-robin fairness
+  
+  -- Action selection based on node state
+  next(action_type) := 
+    case
+      -- Leaders send heartbeats
+      roles[next(active_node)] = leader : {send_heartbeat, none};
+      
+      -- Candidates request votes or become leaders
+      roles[next(active_node)] = candidate : 
+        {request_vote, become_leader, process_message, none};
+      
+      -- Followers process messages, timeout, or become candidates
+      roles[next(active_node)] = follower & node0.timeout : 
+        {become_candidate, process_message, none};
+      
+      roles[next(active_node)] = follower & !node0.timeout : 
+        {process_message, trigger_timeout, none};
+      
+      TRUE : {none};
+    esac;
+  
+  -- Message target selection (excluding self for requests)
+  next(message_target) :=
+    case
+      next(action_type) = send_heartbeat | next(action_type) = request_vote : 
+        case
+          next(active_node) = 0 : {1, 2}; -- If node 0 is active, target 1 or 2
+          next(active_node) = 1 : {0, 2}; -- If node 1 is active, target 0 or 2
+          next(active_node) = 2 : {0, 1}; -- If node 2 is active, target 0 or 1
+          TRUE : 0; -- Default case
+        esac;
+      next(action_type) = respond_to_vote : 
+        -- Send response to whoever sent us the most recent vote request
+        node0.inbox_sender[0];
+      TRUE : 0; -- Default
+    esac;
+
+-- Safety properties
+-- No two leaders in the same term (pairwise checks)
+SPEC AG !(roles[0] = leader & roles[1] = leader & current_terms[0] = current_terms[1])
+SPEC AG !(roles[0] = leader & roles[2] = leader & current_terms[0] = current_terms[2])
+SPEC AG !(roles[1] = leader & roles[2] = leader & current_terms[1] = current_terms[2])
+
+-- Terms never decrease for any node
+SPEC AG (current_terms[0] = n -> AX (current_terms[0] >= n))
+SPEC AG (current_terms[1] = n -> AX (current_terms[1] >= n))
+SPEC AG (current_terms[2] = n -> AX (current_terms[2] >= n))
+

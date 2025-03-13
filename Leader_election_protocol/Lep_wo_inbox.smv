@@ -1,0 +1,660 @@
+-- Leader Election Protocol without Inbox
+MODULE main
+
+-- Define constants
+DEFINE
+  n := 3; -- Number of nodes (fixed at 3 for this model)
+  majority := 2; -- Majority threshold (n/2 + 1)
+
+-- Variables
+VAR
+  -- Node states (0=follower, 1=candidate, 2=leader)
+  node_state : array 0..2 of 0..2;
+  
+  -- Terms for each node
+  current_term : array 0..2 of 0..10;
+  
+  -- Which node each node voted for (-1 means no vote)
+  voted_for : array 0..2 of -1..2;
+  
+  -- NEW: Track which nodes have granted votes to which candidates
+  vote_granted : array 0..2 of array 0..2 of boolean;
+  
+  -- Timeout occurred for a node
+  timeout : array 0..2 of boolean;
+  
+  -- Number of votes received by each node
+  rec_vote : array 0..2 of 0..3;
+  
+  -- Leader sending heartbeat (ID of leader, -1 if none)
+  heartbeat_sender : -1..2;
+  
+  -- Term of the last received heartbeat
+  rec_heart_term : array 0..2 of 0..10;
+  
+  -- Whether nodes are active (not crashed)
+  node_active : array 0..2 of boolean;
+  
+  -- NEW: Known leader for each node in their current term (-1 if unknown)
+  known_leader : array 0..2 of -1..2;
+  
+  -- Current action being taken
+  action : {crash_node, leader_heartbeat, follower_timeout, request_vote, 
+            grant_vote, candidate_wins, higher_term, acknowledge_leader};
+            
+  -- Which node the action applies to
+  action_node : 0..2;
+  
+  -- For two-node interactions, the second node
+  target_node : 0..2;
+  
+  -- Auxiliary variable for higher term case
+  higher_term_val : 0..10;
+
+-- Initial state
+ASSIGN
+  init(node_state[0]) := 2; -- Node 0 starts as leader
+  init(node_state[1]) := 0; -- Node 1 starts as follower
+  init(node_state[2]) := 0; -- Node 2 starts as follower
+  
+  init(current_term[0]) := 0;
+  init(current_term[1]) := 0;
+  init(current_term[2]) := 0;
+  
+  init(voted_for[0]) := 0;
+  init(voted_for[1]) := 0;
+  init(voted_for[2]) := 0;
+  
+  -- Initialize vote_granted to FALSE
+  init(vote_granted[0][0]) := FALSE;
+  init(vote_granted[0][1]) := FALSE;
+  init(vote_granted[0][2]) := FALSE;
+  init(vote_granted[1][0]) := FALSE;
+  init(vote_granted[1][1]) := FALSE;
+  init(vote_granted[1][2]) := FALSE;
+  init(vote_granted[2][0]) := FALSE;
+  init(vote_granted[2][1]) := FALSE;
+  init(vote_granted[2][2]) := FALSE;
+  
+  init(timeout[0]) := FALSE;
+  init(timeout[1]) := FALSE;
+  init(timeout[2]) := FALSE;
+  
+  init(rec_vote[0]) := 0;
+  init(rec_vote[1]) := 0;
+  init(rec_vote[2]) := 0;
+  
+  init(heartbeat_sender) := 0;
+  
+  init(rec_heart_term[0]) := 0;
+  init(rec_heart_term[1]) := 0;
+  init(rec_heart_term[2]) := 0;
+  
+  init(node_active[0]) := TRUE;
+  init(node_active[1]) := TRUE;
+  init(node_active[2]) := TRUE;
+  
+  -- Initialize known leader
+  init(known_leader[0]) := 0;
+  init(known_leader[1]) := 0;
+  init(known_leader[2]) := 0;
+  
+  init(action) := crash_node;
+  init(action_node) := 0;
+  init(target_node) := 0;
+  init(higher_term_val) := 0;
+
+-- Next state transitions for action selection
+ASSIGN
+  next(action) := {crash_node, leader_heartbeat, follower_timeout, 
+                   request_vote, grant_vote, candidate_wins, higher_term,
+                   acknowledge_leader};
+  next(action_node) := {0, 1, 2};
+  next(target_node) := {0, 1, 2};
+
+-- Next state transitions for state variables
+ASSIGN
+  -- Action 1: Crash a node
+  next(node_active[0]) := 
+    case
+      next(action) = crash_node & next(action_node) = 0 : FALSE;
+      TRUE : node_active[0];
+    esac;
+  
+  next(node_active[1]) := 
+    case
+      next(action) = crash_node & next(action_node) = 1 : FALSE;
+      TRUE : node_active[1];
+    esac;
+  
+  next(node_active[2]) := 
+    case
+      next(action) = crash_node & next(action_node) = 2 : FALSE;
+      TRUE : node_active[2];
+    esac;
+  
+  -- Action 2: Leader sends heartbeats
+  next(heartbeat_sender) := 
+    case
+      next(action) = leader_heartbeat & 
+      node_state[next(action_node)] = 2 & 
+      node_active[next(action_node)] : next(action_node);
+      TRUE : heartbeat_sender;
+    esac;
+  
+  next(timeout[0]) := 
+    case
+      next(action) = leader_heartbeat & 
+      node_state[0] = 0 & node_active[0] &
+      current_term[0] <= current_term[next(action_node)] : FALSE;
+      next(action) = follower_timeout & 
+      next(action_node) = 0 : TRUE;
+      TRUE : timeout[0];
+    esac;
+  
+  next(timeout[1]) := 
+    case
+      next(action) = leader_heartbeat & 
+      node_state[1] = 0 & node_active[1] &
+      current_term[1] <= current_term[next(action_node)] : FALSE;
+      next(action) = follower_timeout & 
+      next(action_node) = 1 : TRUE;
+      TRUE : timeout[1];
+    esac;
+  
+  next(timeout[2]) := 
+    case
+      next(action) = leader_heartbeat & 
+      node_state[2] = 0 & node_active[2] &
+      current_term[2] <= current_term[next(action_node)] : FALSE;
+      next(action) = follower_timeout & 
+      next(action_node) = 2 : TRUE;
+      TRUE : timeout[2];
+    esac;
+  
+  -- Update rec_heart_term for heartbeat recipients
+  next(rec_heart_term[0]) := 
+    case
+      next(action) = leader_heartbeat & node_active[0] & 
+      next(action_node) != 0 &
+      current_term[0] <= current_term[next(action_node)] : 
+        current_term[next(action_node)];
+      TRUE : rec_heart_term[0];
+    esac;
+  
+  next(rec_heart_term[1]) := 
+    case
+      next(action) = leader_heartbeat & node_active[1] & 
+      next(action_node) != 1 &
+      current_term[1] <= current_term[next(action_node)] : 
+        current_term[next(action_node)];
+      TRUE : rec_heart_term[1];
+    esac;
+  
+  next(rec_heart_term[2]) := 
+    case
+      next(action) = leader_heartbeat & node_active[2] & 
+      next(action_node) != 2 &
+      current_term[2] <= current_term[next(action_node)] : 
+        current_term[next(action_node)];
+      TRUE : rec_heart_term[2];
+    esac;
+  
+  -- Action 3: Follower times out
+  next(node_state[0]) := 
+    case
+      next(action) = follower_timeout & 
+      next(action_node) = 0 & 
+      node_state[0] = 0 & node_active[0] : 1; -- Become candidate
+      
+      next(action) = candidate_wins & 
+      next(action_node) = 0 & 
+      node_state[0] = 1 & node_active[0] & 
+      rec_vote[0] >= majority : 2; -- Become leader with majority
+      
+      next(action) = higher_term & 
+      next(action_node) = 0 : 0; -- Revert to follower on higher term
+      
+      next(action) = acknowledge_leader &
+      next(action_node) = 0 &
+      next(target_node) != 0 &
+      node_state[0] != 0 &
+      current_term[0] = current_term[next(target_node)] &
+      node_state[next(target_node)] = 2 : 0; -- Step down if conflict
+      
+      next(action) = leader_heartbeat &
+      next(action_node) != 0 &
+      node_state[0] != 0 &
+      current_term[0] <= current_term[next(action_node)] &
+      node_state[next(action_node)] = 2 : 0; -- Step down on heartbeat from leader
+      
+      -- Add this rule: When term increases, become follower
+      next(current_term[0]) > current_term[0] : 0;
+      
+      -- And this one: When receiving heartbeat from another leader in same term
+      next(action) = leader_heartbeat &
+      next(action_node) != 0 &
+      node_active[0] &
+      node_state[0] = 2 &
+      current_term[next(action_node)] >= current_term[0] : 0;
+      
+      TRUE : node_state[0];
+    esac;
+  
+  next(node_state[1]) := 
+    case
+      next(action) = follower_timeout & 
+      next(action_node) = 1 & 
+      node_state[1] = 0 & node_active[1] : 1;
+      
+      next(action) = candidate_wins & 
+      next(action_node) = 1 & 
+      node_state[1] = 1 & node_active[1] & 
+      rec_vote[1] >= majority : 2;
+      
+      next(action) = higher_term & 
+      next(action_node) = 1 : 0;
+      
+      next(action) = acknowledge_leader &
+      next(action_node) = 1 &
+      next(target_node) != 1 &
+      node_state[1] != 0 &
+      current_term[1] = current_term[next(target_node)] &
+      node_state[next(target_node)] = 2 : 0;
+      
+      next(action) = leader_heartbeat &
+      next(action_node) != 1 &
+      node_state[1] != 0 &
+      current_term[1] <= current_term[next(action_node)] &
+      node_state[next(action_node)] = 2 : 0;
+      
+      -- Add this rule: When term increases, become follower
+      next(current_term[1]) > current_term[1] : 0;
+      
+      TRUE : node_state[1];
+    esac;
+  
+  next(node_state[2]) := 
+    case
+      next(action) = follower_timeout & 
+      next(action_node) = 2 & 
+      node_state[2] = 0 & node_active[2] : 1;
+      
+      next(action) = candidate_wins & 
+      next(action_node) = 2 & 
+      node_state[2] = 1 & node_active[2] & 
+      rec_vote[2] >= majority : 2;
+      
+      next(action) = higher_term & 
+      next(action_node) = 2 : 0;
+      
+      next(action) = acknowledge_leader &
+      next(action_node) = 2 &
+      next(target_node) != 2 &
+      node_state[2] != 0 &
+      current_term[2] = current_term[next(target_node)] &
+      node_state[next(target_node)] = 2 : 0;
+      
+      next(action) = leader_heartbeat &
+      next(action_node) != 2 &
+      node_state[2] != 0 &
+      current_term[2] <= current_term[next(action_node)] &
+      node_state[next(action_node)] = 2 : 0;
+      
+      -- Add this rule: When term increases, become follower
+      next(current_term[2]) > current_term[2] : 0;
+      
+      TRUE : node_state[2];
+    esac;
+  
+  -- Update known leader when receiving heartbeat
+  next(known_leader[0]) := 
+    case
+      next(action) = leader_heartbeat & 
+      node_active[0] &
+      current_term[0] <= current_term[next(action_node)] : next(action_node);
+      
+      next(action) = acknowledge_leader &
+      next(action_node) = 0 &
+      node_active[0] &
+      current_term[0] = current_term[next(target_node)] &
+      node_state[next(target_node)] = 2 : next(target_node);
+      
+      next(action) = higher_term &
+      next(action_node) = 0 : -1;
+      
+      TRUE : known_leader[0];
+    esac;
+  
+  next(known_leader[1]) := 
+    case
+      next(action) = leader_heartbeat & 
+      node_active[1] &
+      current_term[1] <= current_term[next(action_node)] : next(action_node);
+      
+      next(action) = acknowledge_leader &
+      next(action_node) = 1 &
+      node_active[1] &
+      current_term[1] = current_term[next(target_node)] &
+      node_state[next(target_node)] = 2 : next(target_node);
+      
+      next(action) = higher_term &
+      next(action_node) = 1 : -1;
+      
+      TRUE : known_leader[1];
+    esac;
+  
+  next(known_leader[2]) := 
+    case
+      next(action) = leader_heartbeat & 
+      node_active[2] &
+      current_term[2] <= current_term[next(action_node)] : next(action_node);
+      
+      next(action) = acknowledge_leader &
+      next(action_node) = 2 &
+      node_active[2] &
+      current_term[2] = current_term[next(target_node)] &
+      node_state[next(target_node)] = 2 : next(target_node);
+      
+      next(action) = higher_term &
+      next(action_node) = 2 : -1;
+      
+      TRUE : known_leader[2];
+    esac;
+  
+  -- Action 4: Request votes and track individual votes
+  next(vote_granted[0][0]) := 
+    case
+      next(action) = grant_vote & 
+      next(action_node) = 0 & 
+      next(target_node) = 0 &
+      node_active[0] : TRUE;
+      
+      next(action) = higher_term &
+      next(action_node) = 0 : FALSE;
+      
+      TRUE : vote_granted[0][0];
+    esac;
+  
+  next(vote_granted[0][1]) := 
+    case
+      next(action) = grant_vote & 
+      next(action_node) = 0 & 
+      next(target_node) = 1 &
+      node_active[0] : TRUE;
+      
+      next(action) = higher_term &
+      next(action_node) = 0 : FALSE;
+      
+      TRUE : vote_granted[0][1];
+    esac;
+  
+  next(vote_granted[0][2]) := 
+    case
+      next(action) = grant_vote & 
+      next(action_node) = 0 & 
+      next(target_node) = 2 &
+      node_active[0] : TRUE;
+      
+      next(action) = higher_term &
+      next(action_node) = 0 : FALSE;
+      
+      TRUE : vote_granted[0][2];
+    esac;
+  
+  -- Similar updates for nodes 1 and 2 vote grants
+  next(vote_granted[1][0]) := 
+    case
+      next(action) = grant_vote & 
+      next(action_node) = 1 & 
+      next(target_node) = 0 &
+      node_active[1] : TRUE;
+      
+      next(action) = higher_term &
+      next(action_node) = 1 : FALSE;
+      
+      TRUE : vote_granted[1][0];
+    esac;
+  
+  next(vote_granted[1][1]) := 
+    case
+      next(action) = grant_vote & 
+      next(action_node) = 1 & 
+      next(target_node) = 1 &
+      node_active[1] : TRUE;
+      
+      next(action) = higher_term &
+      next(action_node) = 1 : FALSE;
+      
+      TRUE : vote_granted[1][1];
+    esac;
+  
+  next(vote_granted[1][2]) := 
+    case
+      next(action) = grant_vote & 
+      next(action_node) = 1 & 
+      next(target_node) = 2 &
+      node_active[1] : TRUE;
+      
+      next(action) = higher_term &
+      next(action_node) = 1 : FALSE;
+      
+      TRUE : vote_granted[1][2];
+    esac;
+  
+  next(vote_granted[2][0]) := 
+    case
+      next(action) = grant_vote & 
+      next(action_node) = 2 & 
+      next(target_node) = 0 &
+      node_active[2] : TRUE;
+      
+      next(action) = higher_term &
+      next(action_node) = 2 : FALSE;
+      
+      TRUE : vote_granted[2][0];
+    esac;
+  
+  next(vote_granted[2][1]) := 
+    case
+      next(action) = grant_vote & 
+      next(action_node) = 2 & 
+      next(target_node) = 1 &
+      node_active[2] : TRUE;
+      
+      next(action) = higher_term &
+      next(action_node) = 2 : FALSE;
+      
+      TRUE : vote_granted[2][1];
+    esac;
+  
+  next(vote_granted[2][2]) := 
+    case
+      next(action) = grant_vote & 
+      next(action_node) = 2 & 
+      next(target_node) = 2 &
+      node_active[2] : TRUE;
+      
+      next(action) = higher_term &
+      next(action_node) = 2 : FALSE;
+      
+      TRUE : vote_granted[2][2];
+    esac;
+  
+  -- Count votes based on vote grants
+  next(rec_vote[0]) := 
+    case
+      next(action) = request_vote & 
+      next(action_node) = 0 & 
+      node_state[0] = 1 & node_active[0] : 
+        (vote_granted[0][0] ? 1 : 0) + 
+        (vote_granted[1][0] ? 1 : 0) + 
+        (vote_granted[2][0] ? 1 : 0);
+      
+      next(action) = grant_vote &
+      next(target_node) = 0 : 
+        (vote_granted[0][0] ? 1 : 0) + 
+        (vote_granted[1][0] ? 1 : 0) + 
+        (vote_granted[2][0] ? 1 : 0);
+      
+      TRUE : rec_vote[0];
+    esac;
+  
+  next(rec_vote[1]) := 
+    case
+      next(action) = request_vote & 
+      next(action_node) = 1 & 
+      node_state[1] = 1 & node_active[1] : 
+        (vote_granted[0][1] ? 1 : 0) + 
+        (vote_granted[1][1] ? 1 : 0) + 
+        (vote_granted[2][1] ? 1 : 0);
+      
+      next(action) = grant_vote &
+      next(target_node) = 1 :
+        (vote_granted[0][1] ? 1 : 0) + 
+        (vote_granted[1][1] ? 1 : 0) + 
+        (vote_granted[2][1] ? 1 : 0);
+      
+      TRUE : rec_vote[1];
+    esac;
+  
+  next(rec_vote[2]) := 
+    case
+      next(action) = request_vote & 
+      next(action_node) = 2 & 
+      node_state[2] = 1 & node_active[2] : 
+        (vote_granted[0][2] ? 1 : 0) + 
+        (vote_granted[1][2] ? 1 : 0) + 
+        (vote_granted[2][2] ? 1 : 0);
+      
+      next(action) = grant_vote &
+      next(target_node) = 2 :
+        (vote_granted[0][2] ? 1 : 0) + 
+        (vote_granted[1][2] ? 1 : 0) + 
+        (vote_granted[2][2] ? 1 : 0);
+      
+      TRUE : rec_vote[2];
+    esac;
+  
+  -- Action 5: Grant vote to candidate
+  next(voted_for[0]) := 
+    case
+      next(action) = grant_vote & 
+      next(action_node) = 0 & 
+      node_state[0] = 0 & node_active[0] : next(target_node);
+      
+      next(action) = higher_term & 
+      next(action_node) = 0 : -1;
+      
+      TRUE : voted_for[0];
+    esac;
+  
+  next(voted_for[1]) := 
+    case
+      next(action) = grant_vote & 
+      next(action_node) = 1 & 
+      node_state[1] = 0 & node_active[1] : next(target_node);
+      
+      next(action) = higher_term & 
+      next(action_node) = 1 : -1;
+      
+      TRUE : voted_for[1];
+    esac;
+  
+  next(voted_for[2]) := 
+    case
+      next(action) = grant_vote & 
+      next(action_node) = 2 & 
+      node_state[2] = 0 & node_active[2] : next(target_node);
+      
+      next(action) = higher_term & 
+      next(action_node) = 2 : -1;
+      
+      TRUE : voted_for[2];
+    esac;
+  
+  -- Terms updates with range check
+  next(current_term[0]) := 
+    case
+      next(action) = follower_timeout & 
+      next(action_node) = 0 & 
+      node_state[0] = 0 & node_active[0] & 
+      current_term[0] < 10 : current_term[0] + 1;
+      
+      next(action) = higher_term & 
+      next(action_node) = 0 : next(higher_term_val);
+      
+      next(action) = leader_heartbeat &
+      next(action_node) != 0 &
+      current_term[0] < current_term[next(action_node)] :
+        current_term[next(action_node)];
+      
+      TRUE : current_term[0];
+    esac;
+  
+  next(current_term[1]) := 
+    case
+      next(action) = follower_timeout & 
+      next(action_node) = 1 & 
+      node_state[1] = 0 & node_active[1] & 
+      current_term[1] < 10 : current_term[1] + 1;
+      
+      next(action) = higher_term & 
+      next(action_node) = 1 : next(higher_term_val);
+      
+      next(action) = leader_heartbeat &
+      next(action_node) != 1 &
+      current_term[1] < current_term[next(action_node)] :
+        current_term[next(action_node)];
+      
+      TRUE : current_term[1];
+    esac;
+  
+  next(current_term[2]) := 
+    case
+      next(action) = follower_timeout & 
+      next(action_node) = 2 & 
+      node_state[2] = 0 & node_active[2] & 
+      current_term[2] < 10 : current_term[2] + 1;
+      
+      next(action) = higher_term & 
+      next(action_node) = 2 : next(higher_term_val);
+      
+      next(action) = leader_heartbeat &
+      next(action_node) != 2 &
+      current_term[2] < current_term[next(action_node)] :
+        current_term[next(action_node)];
+      
+      TRUE : current_term[2];
+    esac;
+  
+  -- Action 7: Higher term message received
+  next(higher_term_val) := 
+    case
+      next(action) = higher_term : {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+      TRUE : higher_term_val;
+    esac;
+
+-- Invariants to check
+INVARSPEC
+  -- Each node is in exactly one state (follower, candidate, or leader)
+  (node_state[0] = 0 | node_state[0] = 1 | node_state[0] = 2) &
+  (node_state[1] = 0 | node_state[1] = 1 | node_state[1] = 2) &
+  (node_state[2] = 0 | node_state[2] = 1 | node_state[2] = 2);
+
+-- No two leaders in the same term
+INVARSPEC
+  !(node_state[0] = 2 & node_state[1] = 2 & current_term[0] = current_term[1]) &
+  !(node_state[0] = 2 & node_state[2] = 2 & current_term[0] = current_term[2]) &
+  !(node_state[1] = 2 & node_state[2] = 2 & current_term[1] = current_term[2]);
+
+-- If two nodes are leaders, they must have different terms
+--INVARSPEC
+--  (node_state[0] = 2 & node_state[1] = 2) -> current_term[0] != current_term[1];
+--INVARSPEC
+--  (node_state[0] = 2 & node_state[2] = 2) -> current_term[0] != current_term[2];
+--INVARSPEC
+-- (node_state[1] = 2 & node_state[2] = 2) -> current_term[1] != current_term[2];
+
+
+

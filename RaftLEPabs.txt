@@ -1,0 +1,158 @@
+Q: What is a reasonable abstract model to use that allows invariants proved for an abstract model
+to expedite BMC at a concrete implementation level?
+
+Level 1. An extremely nondeterministic Existential abstraction
+
+Role = {F,C,L}
+Procid = {0,1,..,Max}
+Term = PosInt
+State = Node: [Procid] --> <R: Role, t: Term>
+
+Init(s: State) = (\forall (i: Procid) . s[i].R = F && s[i].t = 1)
+
+T(s,s') =
+  (\forall (i,j: Procid) . (s'[i].R=L && s[j].R = L) ==> i=j) &&
+  (\forall (i: Procid) . (s[i].t <= s'[i].t))
+
+This abstraction obviously satisfies the LEP safety property (invariant):
+  LEP(s) = (\forall (i,j: Procid) . (i /=j) ==> ~(s[i].R=L && s[j].R=L))
+
+Note: A LEP-correct RAFT protocol implementation is indeed a formal refinement of this model. That is, the following existential abstraction criteria holds between a concrete model and an abstract model, w.r.t. a given abstraction mapping.
+
+A: [CS --> AS]
+T: [(AS,AS) --> Bool]
+T^: [(CS, CS) --> Bool]
+
+RefinementCond: ``Every feasible concrete trace from an concrete initial state,
+                  when lifted by A to an abstract trace must be feasible in the abstract model''
+InitCond: (\forall (cs: CS): . Init(A(cs)))
+SimulateCond: Init(A(cs_0)) &&
+              [\forall (i >=0): (T^(cs_0,cs_1) && ... && T^(cs_i, cs_{i+1}))
+	                            ==> (T(A(cs_0), cs_1) && ... && T^(A(cs_i), A(cs_{i+1}))) ]
+//ConservCond: (\forall (cs, cs': CA) . T^(cs, cs') ==> T(A(cs), A(cs')))
+
+The above is a sufficient condition to ensure that an abstract model is an existential abstraction of the conrete model, which in turn guarantees every safety property that holds for the abstract model is also preserved for the concrete model.
+
+But, such an extreme abstraction is not useful for our purpose as it doesn't expose enough state information to allow for using invariants specified that can exploited for BMC debugging of a concrete implementation as there are none other than the safety property itself.
+
+What criteria an abstract model ought to meet to serve such a purpose?
+
+a. It must have enough state information to allow exhibition of violation of the safety property and other supporting inductive invariants that are expected to hold for the protocol and are sufficient to ensure the safety property at the abstract level.
+
+b. It must be an existential abstraction of a correct implementation of the protocol under test.  That is, the abstraction can be made as abstract as one wishes, but must NOT exclude any behaviors (traces) legally permissible by a correct implementation of the protocol.  One can exploit non-determinism as feasible in defining transition relation to keep the model as abstract and "small" as possible.
+
+c. The safety propety itself preferably should not be inductive for the transition relation; if it is so, then there'll be no need for using any supporting invariants to prove the safety property.
+
+d. Yes, it must be small enough to simplify proof of the safety property.
+
+Note: The challenge of constructing such an abstract model lies in choosing the state to be retained in nthe abstract model and ensuring that NO correct behavior permitted by a concrete protocol implementation is excluded by the transition relation in the abstract model, wjile keeping it small enough to keep proofs simple.
+
+Level 2. A model that abstracts away the network, and messages,
+but retains enough details to make it necessary to define supporting
+invariants to prove safety.
+
+Role = {F,C,L}
+Procid = {0,1,..,Max}
+Term = PosInt
+Quorum = bool
+
+//maintains the number of received by a node from every node
+Votes = [Procid] Nat
+
+//The procid of nodes that have voted for this node
+// Do you need this?  
+//Votefrom = [0..Max] Procid U {-1}    [-1, -1, -1] --> [0,-1,-1] --> [0,2,-1] 
+
+State = Node: [Procid] --> <Role, Term, ms: Votes, q: Quorum>
+
+T: [(AS,AS) --> Bool]
+
+Init(s) =
+  (\forall (i: Procid) .
+      s[i].R = F && s[i].t = 1) &&
+      (\forall (j: Procid) . s[i].ms[j] = 0) &&
+      .... )
+  
+
+T(s,s': State) =
+  (\forall (i: Procid):
+    (s[i].t <= s'[i].t) &&
+
+    //Update rules for Role
+    (s[i].R = C && ~s[i].q && s'[i].q ==> s'[i].R = L)
+
+    //Update rules for quorum
+    //???
+
+    // Update rules for ms
+    ????
+
+    //Update rules for vf
+    ???? )
+
+ LEP(s) = (\forall (i: Procid) .
+              (\forall (j: Procid) . (i /=j) ==> ~(s[i].R=L && s[j]=L.R)) &&
+	      (s[i].R=L ==> ucard(s[i].ms) >= Max/2+1 ) )
+
+Note: All the update rules have to be defined so that the abstract model is an existential abstraction of a correct version of the actual protocol.  That is, it doesn't exclude any concrete behavior permitted by the protocol when lifted to the abstract model.  This requires careful thinking regarding what state components you choose to exclude from a concrete model and how much non-determinism to use.
+
+The logical reasoning why LEP safety is ennsured in RAFT can be expressed because the protocol
+is expeccted to preserve the following invariants:
+
+// There can at most one node that has quorum
+UniqueQ(s) =
+  (\forall (i ,j: Procid) . i/=j ==> ~(s[i].q && s[j].q)
+
+// A node can have a quorum ONLY when it received a majority of votes
+MajQ(s) =
+  (\forall (i : Procid) . s[i].q <==> (ucard(s[i].ms) >= Max/2+1)
+
+// In any given term, no node may vote for multiple nodes
+UniqueVote(s) =
+  (\forall (i,j: Procid): s[i].ms[p]>0 && s[j].ms[p]>0
+     ==> i=j )
+
+In the above model, LEP safety is not inductive by itself. But, with the three supporting inductive invariants, it holds for the model.  I believe this is easy to establish.
+
+What is an easy way to define the transition relation so that the supporting inductive invariants are preserved thereby guaranteeing LEP safety?  Building them innto the definition of transition model
+as shownn nbelow!!
+
+Init(s) ==> UniqueQ(s) && MajQ(s) && UniqueVote(s)
+
+T(s,s': State) =
+  (\forall (i: Procid):
+    (s[i].t <= s'[i].t) &&
+
+    //Update rules for Role
+    (s[i].R = C && ~s[i].q && s'[i].q ==> s'[i].R = L) &&
+
+    UniqueQ(s') && MajQ(s') && UniqueVote(s')
+
+This model obviously preserved the invariants and hence is LEP safe.
+
+This model can be used to perform BMC on a concrete implementation as follows via an suitavbly defined abstraction function A.
+
+T_cs(cs0,cs1) && ...
+~[LEP(A(cs)) &&  UniqueQ(A(cs) && MajQ(A(cs)) && ..]
+
+Of course, this is not the only abstract model that can be used.  One can come up with more refined models which still preserve the inductive invariants, but not necessarily by construction.  What might be an advantage of using such a more refined model for our purpose?  Such a refined model, may permit expressing more inductive invariants that are expected needed for showing LEP safety besides the the invariants listed above.  These additional invariants may help in BMC debugging even faster?  Also, proving correctness of a more refined model, i.e., closed to an implementation, given even a better confidence in correctnes of a the implementation.
+
+
+Level 3: A model that abstracts away the network, but a pool of messages (or an abstraction thereof), of the messages in flight
+
+This is the level at which Arpan has made a model and is trying to complete a proof.
+
+
+
+*************
+
+
+
+
+
+
+
+
+
+
+

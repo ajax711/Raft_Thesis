@@ -1,0 +1,655 @@
+module common{
+	type procid = enum{id0, id1, id2,net,dud};
+	type state=enum{follower,candidate,leader};
+	type msg_type = enum{hb,vote_req,vote_req_resp};
+	type req_vote_req= record{src:procid,des:procid,term:integer,msg_class:msg_type,status:boolean};
+	type HB= record{src:integer,des:integer,term:integer};
+	type msg_inbox= [integer]req_vote_req;
+	type info = record{node_id:procid,term:integer,cs:state,vote_given:procid,quorum_0:boolean,quorum_1:boolean,quorum_2:boolean,vote_count:integer,quorum_relation:boolean};
+	type history_info = [integer]info;
+	define no_of_nodes():integer=2;
+	type majority;
+	}
+
+
+module scheduler {
+	sharedvar nextsched: common.procid;
+	var scheduler_list:[integer]integer;
+	var scheduler_list_len:integer;
+	
+	init {
+		scheduler_list[0]=3;
+		scheduler_list[1]=2;
+		scheduler_list[2]=1;
+		scheduler_list[3]=0;
+		scheduler_list_len=3;
+	}
+
+	procedure havoc_next()
+	  modifies nextsched;
+		{  havoc nextsched;
+   		assume (nextsched == id0 || nextsched == id1 || nextsched == id2 || nextsched == net);}
+
+	next {
+  		call havoc_next(); 
+		}
+	}
+
+
+module network{
+sharedvar nextscheduled:common.procid;
+input myprocid:common.procid;
+var msg_HB:common.req_vote_req;
+sharedvar receive_msg_inbox_1:common.msg_inbox;
+sharedvar receive_msg_inbox_2:common.msg_inbox;
+sharedvar receive_msg_inbox_0:common.msg_inbox;
+sharedvar common_msg_pool:common.msg_inbox;
+sharedvar receive_msg_inbox_0_len:integer;
+sharedvar receive_msg_inbox_1_len:integer;
+sharedvar receive_msg_inbox_2_len:integer;
+sharedvar common_msg_pool_len:integer;
+sharedvar timeout_HB_0: boolean;
+sharedvar timeout_vote_0: boolean;
+sharedvar timeout_HB_1: boolean;
+sharedvar timeout_vote_1: boolean;
+sharedvar timeout_HB_2: boolean;
+sharedvar timeout_vote_2: boolean;
+sharedvar restart_0:boolean;
+sharedvar restart_1:boolean;
+sharedvar restart_2:boolean;
+var choose:integer;
+var swap_bool:boolean;
+var proxy_msg:common.req_vote_req;
+var drop:boolean;
+var next_choice:integer;
+var node_choice:integer;
+var timeout_choice:integer;
+var random_choice:integer;
+procedure swap_msg()
+modifies common_msg_pool,choose,proxy_msg;
+{
+  havoc choose;
+  assume(choose<common_msg_pool_len && choose>=0);
+  proxy_msg = common_msg_pool[common_msg_pool_len-1];
+  common_msg_pool[common_msg_pool_len-1]=common_msg_pool[choose];
+  common_msg_pool[choose]=proxy_msg;
+}
+procedure drop_msg()
+modifies common_msg_pool_len;
+{
+  common_msg_pool_len=common_msg_pool_len-1;
+}
+procedure deliver_msg()
+modifies receive_msg_inbox_0,receive_msg_inbox_1,receive_msg_inbox_2,common_msg_pool_len,common_msg_pool,receive_msg_inbox_0_len,receive_msg_inbox_1_len,receive_msg_inbox_2_len,choose,drop,proxy_msg;
+{
+  if (common_msg_pool_len>0){
+  if (common_msg_pool[common_msg_pool_len-1].des==id0){
+  
+  receive_msg_inbox_0[receive_msg_inbox_0_len]=common_msg_pool[common_msg_pool_len-1];
+  receive_msg_inbox_0_len=receive_msg_inbox_0_len+1;
+  common_msg_pool_len = common_msg_pool_len-1;
+  
+  }
+  else{
+  if(common_msg_pool[common_msg_pool_len-1].des==id1){
+    receive_msg_inbox_1[receive_msg_inbox_1_len]=common_msg_pool[common_msg_pool_len-1];
+  receive_msg_inbox_1_len=receive_msg_inbox_1_len+1;
+  common_msg_pool_len = common_msg_pool_len-1;
+  }
+  else{
+  if(common_msg_pool[common_msg_pool_len-1].des==id2){
+  receive_msg_inbox_2[receive_msg_inbox_2_len]=common_msg_pool[common_msg_pool_len-1];
+  receive_msg_inbox_2_len=receive_msg_inbox_2_len+1;
+  common_msg_pool_len = common_msg_pool_len-1;
+  }}}
+  }
+}
+procedure timeout_restart()
+modifies random_choice,timeout_choice,timeout_HB_0,timeout_HB_1,timeout_HB_2,timeout_vote_0,timeout_vote_1,
+timeout_vote_2,restart_0,restart_1,restart_2;
+{
+    havoc random_choice;
+  havoc timeout_choice;
+  assume (random_choice == 0 || random_choice == 1 || random_choice == 2);
+  assume (timeout_choice == 0 || timeout_choice == 1 || timeout_choice == 2);
+  if (random_choice==0){
+    if (timeout_choice==0){timeout_HB_0=true;}
+    if (timeout_choice==1){timeout_vote_0=true;}
+    if (timeout_choice==2){restart_0=true;}
+  }
+  else{
+    if (random_choice==1){
+    if (timeout_choice==0){timeout_HB_1=true;}
+    if (timeout_choice==1){timeout_vote_1=true;}
+    if (timeout_choice==2){restart_1=true;}
+  }
+  else{
+    if (random_choice==2){
+    if (timeout_choice==0){timeout_HB_2=true;}
+    if (timeout_choice==1){timeout_vote_2=true;}
+    if (timeout_choice==2){restart_2=true;}
+    }
+  }
+  }
+}
+next{
+if (myprocid== nextscheduled && common_msg_pool_len>0){
+havoc next_choice;
+assume( next_choice'==0||next_choice'==1||next_choice'==2|| next_choice'==3);
+if (next_choice'==0){ 
+call deliver_msg();}
+else{
+if(next_choice'==1){call drop_msg();}
+else{
+if(next_choice'==2){call swap_msg();} 
+else{
+if (next_choice'==3){
+  call timeout_restart();
+  }}}}
+}
+else{if (myprocid==nextscheduled){
+  call timeout_restart(); 
+}}
+}
+}
+module node{
+sharedvar nextscheduled:common.procid;
+sharedvar receive_msg_inbox:common.msg_inbox;
+sharedvar receive_msg_inbox_len:integer;
+sharedvar common_msg_pool:common.msg_inbox;
+sharedvar common_msg_pool_len:integer;
+sharedvar timeout_HB: boolean;
+sharedvar timeout_vote: boolean;
+sharedvar restart:boolean;
+sharedvar previous_records: common.history_info;
+sharedvar history_len:integer;
+input myprocid:common.procid;
+var history:common.info;
+var varprocid:common.procid;
+var msg_class:common.msg_type;
+var cs: common.state;
+var term: integer;
+var message:common.req_vote_req;
+var msg_req_vote: common.req_vote_req;
+var msg_resp_vote: common.req_vote_req;
+var my_inbox:common.msg_inbox;
+var my_inbox_len:integer;
+var all_msg_history:common.msg_inbox;
+var all_msg_history_len:integer;
+var choice:boolean;
+var quorum:[integer]boolean;
+var end:integer; 
+var id:integer;
+var vote_given:common.procid;
+var already_vote_given:boolean;
+var quorum_relation:boolean;
+var src:common.procid;
+var des:common.procid;
+var status:boolean;
+var vote_count:integer;
+define no_of_nodes():integer=2;
+init{
+my_inbox_len=0;
+all_msg_history_len=0;
+cs=follower;
+timeout_HB=false;
+timeout_vote=false;
+term=1;
+already_vote_given=false;
+vote_given=dud;
+my_inbox_len=0;
+for (i : integer) in range(0, no_of_nodes()) { quorum[i] = false; }
+vote_count=1;
+history.term=1;
+history.vote_given=dud;
+history.cs=follower;
+history.node_id=myprocid;
+history.quorum_0=false;
+history.quorum_1=false;
+history.quorum_2=false;
+history.vote_count = vote_count;
+quorum_relation=false;
+history.quorum_relation=quorum_relation;
+previous_records[0]=history;
+}
+procedure procid_to_index(varprocid:common.procid,status:boolean)
+modifies quorum;
+{
+  
+  if (varprocid==id0){
+    quorum[0]=status;
+  }
+  else{
+    if(varprocid==id1){quorum[1]=status;}
+    else{
+      if(varprocid==id2){quorum[2]=status;}
+    }
+  }
+}
+procedure send_msg(des:common.procid,term:integer,msg_class:common.msg_type,status:boolean)
+modifies common_msg_pool,common_msg_pool_len,msg_req_vote;
+{ 
+  
+  msg_req_vote.src=myprocid;
+  msg_req_vote.term=term;
+  msg_req_vote.des = des;
+  msg_req_vote.msg_class=msg_class;
+  msg_req_vote.status=status;
+  assume(msg_req_vote.msg_class!=hb ==> msg_req_vote.des!= msg_req_vote.src);
+  common_msg_pool[common_msg_pool_len]=msg_req_vote;
+  common_msg_pool_len = common_msg_pool_len+1;
+}
+procedure receive_msg()
+modifies my_inbox,receive_msg_inbox_len,my_inbox_len,term,cs,des,msg_class,status,msg_req_vote,already_vote_given,
+quorum,vote_count,vote_given,common_msg_pool_len,common_msg_pool,previous_records,history_len,history,
+all_msg_history,all_msg_history_len,quorum_relation;
+{
+  
+  
+  if (receive_msg_inbox_len>0){
+    
+    assume(forall(i:integer):: (i>=0 && i<receive_msg_inbox_len) ==>(receive_msg_inbox[i].des==myprocid) && (receive_msg_inbox[i].src!=dud)&&(receive_msg_inbox[i].src!=net) );
+    
+    
+    all_msg_history[all_msg_history_len]=receive_msg_inbox[receive_msg_inbox_len-1];
+    
+    
+    all_msg_history_len = all_msg_history_len+1;
+    }
+  if (restart==true){cs=follower;restart=false;}
+  else{
+    if (cs==follower){
+      if(timeout_HB==true)
+        {cs = candidate;term=term+1; 
+        for (i : integer) in range(0, no_of_nodes()){
+          if (i==0){des=id0;}
+          else{if(i==1){des=id1;}else{if(i==2){des=id2;}}}
+          
+          msg_class = vote_req;status=false;
+          if (des!=myprocid){
+            call procid_to_index(des,false);
+            call send_msg(des,term,msg_class,status);}
+          quorum[i]=false;
+                                                  }
+        call procid_to_index(myprocid,true);
+        vote_given=myprocid;
+        already_vote_given=true;timeout_HB=false;
+        quorum_relation =(quorum[0] && quorum[1]) || (quorum[1] && quorum[2]) || (quorum[0] && quorum[2]);
+        }
+      else{
+        if (receive_msg_inbox_len>0){
+        
+          if (receive_msg_inbox[receive_msg_inbox_len-1].term> term){term = receive_msg_inbox[receive_msg_inbox_len-1].term;already_vote_given=false;vote_given=dud;}
+          else{
+            if (receive_msg_inbox[receive_msg_inbox_len-1].msg_class==hb){
+              if (receive_msg_inbox[receive_msg_inbox_len-1].term>=term){term =receive_msg_inbox[receive_msg_inbox_len-1].term; 
+              
+                                                                        }
+              else{
+                des=receive_msg_inbox[receive_msg_inbox_len-1].src;msg_class=vote_req;status=false;
+                call send_msg(des,term,msg_class,status);
+                receive_msg_inbox_len = receive_msg_inbox_len-1;
+                 }
+                                                                         }
+            else{
+              if (receive_msg_inbox[receive_msg_inbox_len-1].msg_class==vote_req){
+                if(receive_msg_inbox[receive_msg_inbox_len-1].term==term){
+                  
+                 //change if (vote_given==receive_msg_inbox[receive_msg_inbox_len-1].src){ 
+                    des = receive_msg_inbox[receive_msg_inbox_len-1].src;
+                    msg_class=vote_req_resp;status=true;
+                    call send_msg(des,term,msg_class,status);
+                    already_vote_given = true;
+                    vote_given=receive_msg_inbox[receive_msg_inbox_len-1].src;
+                    receive_msg_inbox_len=receive_msg_inbox_len-1;                                  }
+                                                                                              }
+                else{
+                  des = receive_msg_inbox[receive_msg_inbox_len-1].src;
+                  msg_class = vote_req_resp;status=false;
+                  call send_msg(des,term,msg_class,status);
+                  receive_msg_inbox_len=receive_msg_inbox_len-1;
+                    }
+                                                                              }
+                                                                            }
+            }
+              }
+                }
+                }
+    else{
+      if (cs == candidate){
+        if(timeout_HB==true){
+          msg_class = vote_req;status=false;
+          cs = candidate;term=term+1; 
+          for (i : integer) in range(0, no_of_nodes()){
+            if (i==0){des=id0;}
+            else{if(i==1){des=id1;}else{if(i==2){des=id2;}}}
+            
+            if(des!=myprocid){
+              call send_msg(des,term,msg_class,status);}
+                                                      }
+          timeout_HB=false;
+          for (i : integer) in range(0, no_of_nodes()) { quorum[i] = false; }
+          
+          call procid_to_index(myprocid,true);
+          vote_given=myprocid;
+          already_vote_given=true;
+          quorum_relation =(quorum[0] && quorum[1]) || (quorum[1] && quorum[2]) || (quorum[0] && quorum[2]);
+                            }
+        else{
+          if (receive_msg_inbox_len>0){
+            
+            assume(forall(i:integer):: (i>=0 && i<receive_msg_inbox_len) ==>(receive_msg_inbox[i].des==myprocid) && (receive_msg_inbox[i].src!=dud)&&(receive_msg_inbox[i].src!=net) );
+            if (receive_msg_inbox[receive_msg_inbox_len-1].term> term){term = receive_msg_inbox[receive_msg_inbox_len-1].term;already_vote_given=false;vote_given=dud;cs=follower;
+            
+                                                                      }
+          if (cs==candidate){
+            if (receive_msg_inbox[receive_msg_inbox_len-1].msg_class==hb ){
+              if (receive_msg_inbox[receive_msg_inbox_len-1].term>=term){cs=follower;term=receive_msg_inbox[receive_msg_inbox_len-1].term;receive_msg_inbox_len=receive_msg_inbox_len-1;}
+              else{receive_msg_inbox_len=receive_msg_inbox_len-1;}
+                                                                           }
+            else{
+              if (receive_msg_inbox[receive_msg_inbox_len-1].msg_class==vote_req_resp){
+    
+                if (receive_msg_inbox[receive_msg_inbox_len-1].status==true && receive_msg_inbox[receive_msg_inbox_len-1].term==term)
+                {
+                  vote_count=1;
+                  
+                  call procid_to_index(receive_msg_inbox[receive_msg_inbox_len-1].src,true);
+                  for (i : integer) in range(0, no_of_nodes()) { if (quorum[i] ==true){vote_count=vote_count+1;} }
+                  assume (vote_count>=2);
+                  vote_count = vote_count-1; 
+                  
+                  
+                  quorum_relation =(quorum[0] && quorum[1]) || (quorum[1] && quorum[2]) || (quorum[0] && quorum[2]);
+                  if ( quorum_relation ){cs=leader;
+                    msg_class = hb;status=false;
+                    for (i:integer) in range(0, no_of_nodes()){
+                      
+                      if (i==0){des=id0;}
+                      else{if(i==1){des=id1;}else{if(i==2){des=id2;}}}
+                      call send_msg(des,term,msg_class,status);
+                      }
+                    timeout_HB=false;
+                    
+        
+                                        }
+                  
+                  receive_msg_inbox_len=receive_msg_inbox_len-1;
+                  }
+                  else{receive_msg_inbox_len=receive_msg_inbox_len-1;}
+                                               }
+            }
+           }
+         }
+        }
+    if (timeout_vote==true && cs== candidate){
+      msg_class = vote_req;status=false;
+      for (i:integer) in range(0, no_of_nodes()){
+        
+        if (i==0){des=id0;}
+        else{if(i==1){des=id1;}else{if(i==2){des=id2;}}}
+        if (des!=myprocid){
+        call send_msg(des,term,msg_class,status);}}
+    
+        timeout_vote=false;
+                                             }
+      }
+    else{
+      if (timeout_HB==true){
+      msg_class = hb;status=false;
+      for (i:integer) in range(0, no_of_nodes()){
+        if (i==0){des=id0;}
+        else{if(i==1){des=id1;}else{if(i==2){des=id2;}}}
+      
+      call send_msg(des,term,msg_class,status);
+                                                }
+        timeout_HB=false;
+          }
+           }        
+ }
+}
+  history.node_id = myprocid;
+  history.term=term;
+  history.vote_given=vote_given;
+  history.cs=cs;
+  
+  
+   
+  
+  history.quorum_0 = quorum[0];
+  history.quorum_1 = quorum[1];
+  history.quorum_2 = quorum[2];
+  history.vote_count = vote_count;
+  quorum_relation =(quorum[0] && quorum[1]) || (quorum[1] && quorum[2]) || (quorum[0] && quorum[2]);
+  history.quorum_relation=quorum_relation;
+  previous_records[history_len]=history;
+  history_len = history_len+1;
+}
+next{
+if (myprocid== nextscheduled){
+     
+    
+    call receive_msg();
+}
+}
+}
+module main{
+define no_of_nodes():integer=2;
+var cs:common.state;
+var receive_msg_inbox_1:common.msg_inbox;
+var receive_msg_inbox_2:common.msg_inbox;
+var receive_msg_inbox_0:common.msg_inbox;
+var scheduled:common.procid;
+var receive_msg_inbox_1_len:integer;
+var receive_msg_inbox_2_len:integer;
+var receive_msg_inbox_0_len:integer;
+var common_msg_pool:common.msg_inbox;
+var common_msg_pool_len:integer;
+var previous_records_0: common.history_info;
+var previous_records_1: common.history_info;
+var previous_records_2: common.history_info;
+var history_len_0:integer;
+var history_len_1:integer;
+var history_len_2:integer;
+var message: common.req_vote_req;
+var timeout_HB_2: boolean;
+var timeout_vote_2: boolean;
+var timeout_HB_1: boolean;
+var timeout_vote_1: boolean;
+var timeout_HB_0: boolean;
+var timeout_vote_0: boolean;
+var restart_0:boolean;
+var restart_1:boolean;
+var restart_2:boolean;
+var k:integer;
+init{
+receive_msg_inbox_0_len=0;
+receive_msg_inbox_1_len=0;
+receive_msg_inbox_2_len=0;
+common_msg_pool_len=0;
+timeout_HB_0 = false;
+timeout_vote_0 = false;
+timeout_HB_1 = false;
+timeout_vote_1 = false;
+timeout_HB_2 = false;
+timeout_vote_2 = false;
+restart_0= false;
+restart_1=false;
+restart_2=false;
+history_len_0=1;
+history_len_1=1;
+history_len_2=1;
+}
+instance Node0: node(myprocid: (id0),receive_msg_inbox: (receive_msg_inbox_0),receive_msg_inbox_len:(receive_msg_inbox_0_len),previous_records:(previous_records_0),history_len:(history_len_0),common_msg_pool:(common_msg_pool),common_msg_pool_len:(common_msg_pool_len),timeout_HB:(timeout_HB_0),timeout_vote:(timeout_vote_0),restart:(restart_0),nextscheduled:(scheduled));
+instance Node1: node(myprocid: (id1),receive_msg_inbox: (receive_msg_inbox_1),receive_msg_inbox_len:(receive_msg_inbox_1_len),previous_records:(previous_records_1),history_len:(history_len_1),common_msg_pool:(common_msg_pool),common_msg_pool_len:(common_msg_pool_len),timeout_HB:(timeout_HB_1),timeout_vote:(timeout_vote_1),restart:(restart_1),nextscheduled:(scheduled));
+instance Node2: node(myprocid: (id2),receive_msg_inbox: (receive_msg_inbox_2),receive_msg_inbox_len:(receive_msg_inbox_2_len),previous_records:(previous_records_2),history_len:(history_len_2),common_msg_pool:(common_msg_pool),common_msg_pool_len:(common_msg_pool_len),timeout_HB:(timeout_HB_2),timeout_vote:(timeout_vote_2),restart:(restart_2),nextscheduled:(scheduled));
+instance sched : scheduler(nextsched: (scheduled));
+instance Net:network(myprocid: (net),receive_msg_inbox_0: (receive_msg_inbox_0),receive_msg_inbox_0_len:(receive_msg_inbox_0_len),
+common_msg_pool:(common_msg_pool),common_msg_pool_len:(common_msg_pool_len),receive_msg_inbox_1: (receive_msg_inbox_1),
+receive_msg_inbox_1_len:(receive_msg_inbox_1_len),receive_msg_inbox_2: (receive_msg_inbox_2),receive_msg_inbox_2_len:(receive_msg_inbox_2_len),
+timeout_HB_0:(timeout_HB_0),timeout_vote_0:(timeout_vote_0),timeout_HB_1:(timeout_HB_1),timeout_vote_1:(timeout_vote_1),timeout_HB_2:(timeout_HB_2),
+timeout_vote_2:(timeout_vote_2),restart_0:(restart_0),restart_1:(restart_1),restart_2:(restart_2),nextscheduled:(scheduled));
+next {
+ 
+ next (sched);
+ next (Node0);
+ next (Node1);
+ next (Node2);
+ next (Net);
+ }
+invariant init_con: (receive_msg_inbox_0_len>=0 && receive_msg_inbox_1_len>=0 && common_msg_pool_len>=0 && receive_msg_inbox_2_len>=0 &&
+                    Node0.my_inbox_len>=0 && Node1.my_inbox_len>=0 && Node2.my_inbox_len>=0 
+                    && history_len_0>=0 && history_len_2>=0 && history_len_1>=0 
+                    && Node1.vote_count>=1 && Node0.vote_count>=1 && Node2.vote_count>=1
+                    );
+invariant common_msg_pool_prop:(common_msg_pool_len>0)==>(forall(i:integer):: (i>=0 && i<common_msg_pool_len)==>(common_msg_pool[i].src!=dud && common_msg_pool[i].des!=dud && common_msg_pool[i].src!=net && common_msg_pool[i].des!=net)); 
+invariant very_basic:((Node0.cs!=follower)==>(Node0.quorum[0]==true && Node0.vote_given==id0)) &&
+                     ((Node1.cs!=follower)==>(Node1.quorum[1]==true && Node1.vote_given==id1)) &&
+                     ((Node2.cs!=follower)==>(Node2.quorum[2]==true && Node2.vote_given==id2)) ;
+invariant  very_basic_1:(Node0.vote_given!=net) && (Node1.vote_given!=net) && (Node2.vote_given!=net);
+invariant very_basic_2:((receive_msg_inbox_0_len>0)==>(forall (i:integer)::(i>=0 && i<receive_msg_inbox_0_len)==>( receive_msg_inbox_0[i].src!=net && receive_msg_inbox_0[i].src!=dud))) &&
+                       ((receive_msg_inbox_1_len>0)==>(forall (i:integer)::(i>=0 && i<receive_msg_inbox_1_len)==>( receive_msg_inbox_1[i].src!=net && receive_msg_inbox_1[i].src!=dud))) &&
+                       ((receive_msg_inbox_2_len>0)==>(forall (i:integer)::(i>=0 && i<receive_msg_inbox_2_len)==>( receive_msg_inbox_2[i].src!=net && receive_msg_inbox_2[i].src!=dud)));
+invariant very_basic_3:(history_len_0>0 && history_len_1>0 && history_len_2>0 &&
+                        previous_records_0[0].vote_given==dud && previous_records_1[0].vote_given==dud
+                        && previous_records_2[0].vote_given==dud) ;
+invariant very_basic_4:(history_len_0>1==>(forall (i:integer):: (i>0 && i<history_len_0 && previous_records_0[i-1].vote_given!=previous_records_0[i].vote_given && previous_records_0[i-1].term==previous_records_0[i].term) ==>
+                        (previous_records_0[i-1].vote_given==dud)))
+                        &&
+                        (history_len_1>1==>(forall (i:integer):: (i>0 && i<history_len_1 && previous_records_1[i-1].vote_given!=previous_records_1[i].vote_given && previous_records_1[i-1].term==previous_records_1[i].term) ==>
+                        (previous_records_1[i-1].vote_given==dud)))
+                        &&
+                        (history_len_2>1==>(forall (i:integer):: (i>0 && i<history_len_2 && previous_records_2[i-1].vote_given!=previous_records_2[i].vote_given && previous_records_2[i-1].term==previous_records_2[i].term) ==>
+                        (previous_records_2[i-1].vote_given==dud)));
+invariant very_basic_5_1:(history_len_1>0)==>(previous_records_1[history_len_1-1].quorum_0==Node1.quorum[0] && 
+                          previous_records_1[history_len_1-1].quorum_1==Node1.quorum[1] && 
+                          previous_records_1[history_len_1-1].quorum_2==Node1.quorum[2] && 
+                          previous_records_1[history_len_1-1].cs== Node1.cs && 
+                          previous_records_1[history_len_1-1].vote_given == Node1.vote_given) ;
+invariant very_basic_5_0:(history_len_0>0)==>(previous_records_0[history_len_0-1].quorum_0==Node0.quorum[0] && 
+                          previous_records_0[history_len_0-1].quorum_1==Node0.quorum[1] && 
+                          previous_records_0[history_len_0-1].quorum_2==Node0.quorum[2] && 
+                          previous_records_0[history_len_0-1].cs==Node0.cs  && 
+                          previous_records_0[history_len_0-1].vote_given == Node0.vote_given) ;
+invariant very_basic_5_2:(history_len_2>0)==>(previous_records_2[history_len_2-1].quorum_0==Node2.quorum[0] && 
+                         previous_records_2[history_len_2-1].quorum_1==Node2.quorum[1] && 
+                         previous_records_2[history_len_2-1].quorum_2==Node2.quorum[2] && 
+                         previous_records_2[history_len_2-1].cs==Node2.cs  && 
+                         previous_records_2[history_len_2-1].vote_given ==Node2.vote_given );
+invariant very_basic_6:((Node0.all_msg_history_len>0)==>(forall (i:integer)::(i>=0 && i<Node0.all_msg_history_len)==>
+                       ( Node0.all_msg_history[i].src!=net && Node0.all_msg_history[i].src!=dud && Node0.all_msg_history[i].des==id0))) &&
+                       ((Node1.all_msg_history_len>0)==>(forall (i:integer)::(i>=0 && i<Node1.all_msg_history_len)==>
+                      ( Node1.all_msg_history[i].src!=net && Node1.all_msg_history[i].src!=dud && Node1.all_msg_history[i].des==id1))) &&
+                       ((Node2.all_msg_history_len>0)==>(forall (i:integer)::(i>=0 && i<Node2.all_msg_history_len)==>
+                       ( Node2.all_msg_history[i].src!=net && Node2.all_msg_history[i].src!=dud && Node2.all_msg_history[i].des==id2)));
+ 
+invariant leader_criterion_0:(Node0.cs==leader)==>(Node0.vote_count>1);
+invariant basic_1_0:(Node0.term>=1) ;
+invariant basic_2_0: (history_len_0>0)==>(previous_records_0[history_len_0-1].term==Node0.term);
+invariant basic_3_0:(history_len_0>0)==>(previous_records_0[history_len_0-1].vote_given==Node0.vote_given);
+invariant basic_4_0:(Node0.cs==candidate)==>(Node0.vote_count>=1  && Node0.quorum[0]==true);
+invariant constant_id_0:(forall (i:integer)::(i>=0) && (i<history_len_0)==>(previous_records_0[i].node_id==id0 && previous_records_0[i].term>0));
+invariant monotone_term_0:(forall (i:integer)::((i>=0)&&(i<(history_len_0-1)))==>(previous_records_0[i].term<=previous_records_0[i+1].term));
+invariant consistent_vote_given_0:(forall (i:integer)::((i>=0)&&(i<(history_len_0-1)))==>
+                                  (((previous_records_0[i].term==previous_records_0[i+1].term)&&(previous_records_0[i].vote_given!=dud))
+                                  ==>(previous_records_0[i].vote_given==previous_records_0[i+1].vote_given)));
+invariant another_consistent_vote_given_0_con_1:(history_len_0>1 && previous_records_0[history_len_0-1].quorum_2==true && previous_records_0[history_len_0-2].quorum_2==false && 
+                                            previous_records_0[history_len_0-1].term==previous_records_0[history_len_0-2].term && Node0.cs==candidate 
+                                           )==>(Node0.all_msg_history[Node0.all_msg_history_len-1].msg_class==vote_req_resp && Node0.all_msg_history[Node0.all_msg_history_len-1].src==id2 &&
+                                                Node0.all_msg_history[Node0.all_msg_history_len-1].status==true && Node0.all_msg_history[Node0.all_msg_history_len-1].term== Node0.term);
+invariant another_consistent_vote_given_0_con_2:(history_len_2>1 && previous_records_2[history_len_2-1].vote_given!=previous_records_2[history_len_2-2].vote_given && Node2.cs==follower && Node2.vote_given!=dud)==>
+                                                (Node2.all_msg_history[Node2.all_msg_history_len-1].msg_class==vote_req &&  Node2.all_msg_history[Node2.all_msg_history_len-1].src ==Node2.vote_given );
+invariant leader_criterion_1:(Node1.cs==leader)==>(Node1.vote_count>1);
+invariant basic_1_1:(Node1.term>=1) ;
+invariant basic_2_1: (history_len_1>0)==>(previous_records_1[history_len_1-1].term==Node1.term);
+invariant basic_3_1:(history_len_1>0)==>(previous_records_1[history_len_1-1].vote_given==Node1.vote_given);
+invariant basic_4_1:(Node1.cs==candidate)==>(Node1.vote_count>=1  && Node1.quorum[1]==true);
+invariant constant_id_1:(forall (i:integer)::(i>=0) && (i<history_len_1)==>(previous_records_1[i].node_id==id1 && previous_records_1[i].term>0));
+invariant monotone_term_1:(forall (i:integer)::((i>=0)&&(i<(history_len_1-1)))==>(previous_records_1[i].term<=previous_records_1[i+1].term));
+invariant consistent_vote_given_1:(forall (i:integer)::((i>=0)&&(i<(history_len_1-1)))==>
+                                  (((previous_records_1[i].term==previous_records_1[i+1].term)&&(previous_records_1[i].vote_given!=dud))
+                                  ==>(previous_records_1[i].vote_given==previous_records_1[i+1].vote_given)));
+invariant leader_criterion_2:(Node2.cs==leader)==>(Node2.vote_count>1);
+invariant basic_1_2:(Node2.term>=1) ;
+invariant basic_2_2: (history_len_2>0)==>(previous_records_2[history_len_2-1].term==Node2.term);
+invariant basic_3_2:(history_len_2>0)==>(previous_records_2[history_len_2-1].vote_given==Node2.vote_given);
+invariant basic_4_2:(Node2.cs==candidate)==>(Node2.vote_count>=1  && Node2.quorum[2]==true);
+invariant constant_id_2:(forall (i:integer)::(i>=0) && (i<history_len_2)==>(previous_records_2[i].node_id==id2 && previous_records_2[i].term>0));
+invariant monotone_term_2:(forall (i:integer)::((i>=0)&&(i<(history_len_2-1)))==>(previous_records_2[i].term<=previous_records_2[i+1].term));
+invariant consistent_vote_given_2:(forall (i:integer)::((i>=0)&&(i<(history_len_2-1)))==>
+                                  (((previous_records_2[i].term==previous_records_2[i+1].term)&&(previous_records_2[i].vote_given!=dud))
+                                  ==>(previous_records_2[i].vote_given==previous_records_2[i+1].vote_given)));
+invariant bounded_vote_count:(Node1.vote_count<=(no_of_nodes()+1) && Node0.vote_count<=(no_of_nodes()+1) && Node2.vote_count<=(no_of_nodes()+1) &&
+                             Node1.vote_count>=1 && Node0.vote_count>=1 && Node2.vote_count>=1 && previous_records_1[history_len_1-1].vote_count==Node1.vote_count &&
+                             previous_records_2[history_len_2-1].vote_count==Node2.vote_count && previous_records_0[history_len_0-1].vote_count==Node0.vote_count
+                             );
+invariant previous_records_vote_count:(forall(i:integer)::(i>=0 && i<history_len_1)==>previous_records_1[i].vote_count>=1 && previous_records_1[i].vote_count<=(no_of_nodes()+1));
+invariant init_previous_records_con_1:(previous_records_1[0].cs==follower && previous_records_1[0].term==1 && 
+                                       previous_records_1[0].vote_count==1 && previous_records_1[0].quorum_0==false && previous_records_1[0].quorum_1==false && 
+                                       previous_records_1[0].quorum_2==false );
+invariant quorum_relation_con_1_1: Node1.quorum_relation ==(Node1.quorum[0] && Node1.quorum[1]) || (Node1.quorum[1] && Node1.quorum[2]) || (Node1.quorum[0] && Node1.quorum[2]);
+invariant quorum_relation_con_1_2:(forall(i:integer)::(i>=0 && i<history_len_1)==>(previous_records_1[i].quorum_relation==(previous_records_1[i].quorum_0 && previous_records_1[i].quorum_1 )
+                                 ||(previous_records_1[i].quorum_1 && previous_records_1[i].quorum_2)||(previous_records_1[i].quorum_0 && previous_records_1[i].quorum_2) ));
+invariant quorum_relation_con_1_3:(previous_records_1[history_len_1-1].quorum_0==Node1.quorum[0] && previous_records_1[history_len_1-1].quorum_1 == Node1.quorum[1] && previous_records_1[history_len_1-1].quorum_2==Node1.quorum[2] && 
+                                previous_records_1[history_len_1-1].quorum_relation == ((Node1.quorum[0] && Node1.quorum[1]) || (Node1.quorum[1] && Node1.quorum[2]) || (Node1.quorum[0] && Node1.quorum[2])) );
+invariant quorum_relation_con_1_4:(forall(i:integer)::(i>=0 && i<history_len_1 && previous_records_1[i].cs==candidate)==>previous_records_1[i].quorum_1==true  );
+invariant quorum_relation_con_0_1: Node0.quorum_relation ==(Node0.quorum[0] && Node0.quorum[1]) || (Node0.quorum[1] && Node0.quorum[2]) || (Node0.quorum[0] && Node0.quorum[2]);
+invariant quorum_relation_con_0_2:(forall(i:integer)::(i>=0 && i<history_len_0)==>(previous_records_0[i].quorum_relation==(previous_records_0[i].quorum_0 && previous_records_0[i].quorum_1 )
+                                 ||(previous_records_0[i].quorum_1 && previous_records_0[i].quorum_2)||(previous_records_0[i].quorum_0 && previous_records_0[i].quorum_2) ));
+invariant quorum_relation_con_0_3:(previous_records_0[history_len_0-1].quorum_0==Node0.quorum[0] && previous_records_0[history_len_0-1].quorum_1 == Node0.quorum[1] && previous_records_0[history_len_0-1].quorum_2==Node0.quorum[2] && 
+                                previous_records_0[history_len_0-1].quorum_relation == ((Node0.quorum[0] && Node0.quorum[1]) || (Node0.quorum[1] && Node0.quorum[2]) || (Node0.quorum[0] && Node0.quorum[2])) );
+invariant quorum_relation_con_0_4:(forall(i:integer)::(i>=0 && i<history_len_0 && previous_records_0[i].cs==candidate)==>previous_records_0[i].quorum_0==true  );
+invariant quorum_relation_con_2_1: Node2.quorum_relation ==(Node2.quorum[0] && Node2.quorum[1]) || (Node2.quorum[1] && Node2.quorum[2]) || (Node2.quorum[0] && Node2.quorum[2]);
+invariant quorum_relation_con_2_2:(forall(i:integer)::(i>=0 && i<history_len_2)==>(previous_records_2[i].quorum_relation==(previous_records_2[i].quorum_0 && previous_records_2[i].quorum_1 )
+                                 ||(previous_records_2[i].quorum_1 && previous_records_2[i].quorum_2)||(previous_records_2[i].quorum_0 && previous_records_2[i].quorum_2) ));
+invariant quorum_relation_con_2_3:(previous_records_2[history_len_2-1].quorum_0==Node2.quorum[0] && previous_records_2[history_len_2-1].quorum_1 == Node2.quorum[1] && previous_records_2[history_len_2-1].quorum_2==Node2.quorum[2] && 
+                                previous_records_2[history_len_2-1].quorum_relation == ((Node2.quorum[0] && Node2.quorum[1]) || (Node2.quorum[1] && Node2.quorum[2]) || (Node2.quorum[0] && Node2.quorum[2])) );
+invariant quorum_relation_con_2_4:(forall(i:integer)::(i>=0 && i<history_len_2 && previous_records_2[i].cs==candidate)==>previous_records_2[i].quorum_2==true  );
+invariant connect_vote_count_and_quorum_1:
+(forall (i:integer)::(i>=0) && (i<history_len_1-1)==>
+(!previous_records_1[i].quorum_relation && previous_records_1[i+1].quorum_relation && 
+previous_records_1[i].term==previous_records_1[i+1].term && previous_records_1[i+1].cs!=follower && 
+previous_records_1[i].cs!=follower)==>
+((previous_records_1[i+1].quorum_0 && !previous_records_1[i].quorum_0)||
+(previous_records_1[i+1].quorum_2 && !previous_records_1[i].quorum_2)));
+invariant connect_vote_count_and_quorum_2:
+(forall (i:integer)::(i>=0) && (i<history_len_2-1)==>
+(!previous_records_2[i].quorum_relation && previous_records_2[i+1].quorum_relation && 
+previous_records_2[i].term==previous_records_2[i+1].term && previous_records_2[i+1].cs!=follower && 
+previous_records_2[i].cs!=follower)==>
+((previous_records_2[i+1].quorum_0 && !previous_records_2[i].quorum_0)||
+(previous_records_2[i+1].quorum_1 && !previous_records_2[i].quorum_1)));
+invariant connect_vote_count_and_quorum_0:
+(forall (i:integer)::(i>=0) && (i<history_len_0-1)==>
+(!previous_records_0[i].quorum_relation && previous_records_0[i+1].quorum_relation && 
+previous_records_0[i].term==previous_records_0[i+1].term && previous_records_0[i+1].cs!=follower && 
+previous_records_0[i].cs!=follower)==>
+((previous_records_0[i+1].quorum_1 && !previous_records_0[i].quorum_1)||
+(previous_records_0[i+1].quorum_2 && !previous_records_0[i].quorum_2)));
+invariant history_property_1:(Node0.cs!=follower==>history_len_0>0) && 
+                             (Node1.cs!=follower==>history_len_1>0) &&
+                             (Node2.cs!=follower==>history_len_2>0);
+invariant all_msg_history_property:(Node0.all_msg_history_len>=0) &&
+                                   (Node1.all_msg_history_len>=0) &&
+                                   (Node2.all_msg_history_len>=0);
+invariant msg_property_2_0:(receive_msg_inbox_0_len>0)==>((forall (i:integer)::(i>=0 && i<receive_msg_inbox_0_len)==>receive_msg_inbox_0[i].des==id0));
+invariant msg_property_2_1:(receive_msg_inbox_1_len>0)==>( (forall (i:integer)::(i>=0 && i<receive_msg_inbox_1_len)==> receive_msg_inbox_1[i].des==id1));
+invariant msg_property_2_2:(receive_msg_inbox_2_len>0)==>( (forall (i:integer)::(i>=0 && i<receive_msg_inbox_2_len)==> receive_msg_inbox_2[i].des==id2));
+invariant msg_property_3_0:(receive_msg_inbox_0_len>0)==>((forall (i:integer)::(i>=0 && i<receive_msg_inbox_0_len)==>
+                           (receive_msg_inbox_0[i].msg_class!=hb ==> receive_msg_inbox_0[i].src!=receive_msg_inbox_0[i].des )));
+invariant msg_property_3_1:(receive_msg_inbox_1_len>0)==>( (forall (i:integer)::(i>=0 && i<receive_msg_inbox_1_len)==>
+                           (receive_msg_inbox_1[i].msg_class!=hb ==>receive_msg_inbox_1[i].src!=receive_msg_inbox_1[i].des ) ));
+invariant msg_property_3_2:(receive_msg_inbox_2_len>0)==>( (forall (i:integer)::(i>=0 && i<receive_msg_inbox_2_len)==> 
+                           (receive_msg_inbox_2[i].msg_class!=hb ==> receive_msg_inbox_2[i].src!=receive_msg_inbox_2[i].des )  ));
+invariant msg_property_4 :(common_msg_pool_len>0)==>((forall (i:integer)::(i>=0 && i<common_msg_pool_len)==>
+                          (common_msg_pool[i].msg_class!=hb ==> common_msg_pool[i].src!=common_msg_pool[i].des )));
+control {
+ 
+ v= induction;
+ 
+ check;
+print_results;
+ 
+v.print_cex(scheduled,Node1.cs,history_len_1,Node1.term, previous_records_1,receive_msg_inbox_1,receive_msg_inbox_1_len,timeout_HB_1,restart_1);
+}
+}

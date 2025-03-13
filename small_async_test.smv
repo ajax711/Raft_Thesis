@@ -1,0 +1,249 @@
+MODULE node(id, active_flag, action_type, all_nodes, receiver_id)
+VAR
+  current_term : 0..5; -- Term range limited to 0-5 for simplicity
+  state : 0..2; -- 0=follower, 1=candidate, 2=leader
+  timeout_counter : 0..3; -- Counts steps without heartbeat
+  voted_for : -1..2; -- Who this node voted for in current term (-1 for none)
+  
+  -- Array to track nodes who voted for this node
+  nodes_who_voted_for_me : array 0..2 of boolean;
+  
+  -- Voting array - implemented as parallel arrays to represent (node_id, term) tuples
+  voting_requests_id : array 0..2 of -1..2; -- Node IDs requesting votes (-1 means empty slot)
+  voting_requests_term : array 0..2 of 0..5; -- Terms of requesting nodes
+
+DEFINE
+  -- Calculate vote count
+  vote_count := (nodes_who_voted_for_me[0] ? 1 : 0) + 
+                (nodes_who_voted_for_me[1] ? 1 : 0) + 
+                (nodes_who_voted_for_me[2] ? 1 : 0);
+  -- Majority threshold            
+  majority := 2; -- For 3 nodes, majority is 2
+
+ASSIGN
+  init(current_term) := 0;
+  init(state) := 0;
+  init(timeout_counter) := 0;
+  init(voted_for) := -1;
+  
+  -- Initialize vote tracking
+  init(nodes_who_voted_for_me[0]) := FALSE;
+  init(nodes_who_voted_for_me[1]) := FALSE;
+  init(nodes_who_voted_for_me[2]) := FALSE;
+  
+  -- Initialize voting request arrays to empty
+  init(voting_requests_id[0]) := -1;
+  init(voting_requests_id[1]) := -1;
+  init(voting_requests_id[2]) := -1;
+  init(voting_requests_term[0]) := 0;
+  init(voting_requests_term[1]) := 0;
+  init(voting_requests_term[2]) := 0;
+  
+  -- Term transitions
+  next(current_term) :=
+    case
+      -- Increment term when becoming candidate due to timeout
+      active_flag & action_type = timeout_check & state = 0 & timeout_counter = 3 : 
+        min(current_term + 1, 5);
+      
+      -- Update term when processing a vote request with higher term
+      active_flag & action_type = process_votes & 
+      voting_requests_id[0] != -1 & voting_requests_term[0] > current_term : 
+        voting_requests_term[0];
+        
+      -- Update term when receiving heartbeat with higher term
+      active_flag & action_type = receive_heartbeat & 
+      all_nodes[receiver_id].state = 2 & all_nodes[receiver_id].current_term > current_term :
+        all_nodes[receiver_id].current_term;
+        
+      TRUE : current_term;
+    esac;
+
+  -- State transitions
+  next(state) :=
+    case
+      -- Follower becomes candidate on timeout
+      active_flag & action_type = timeout_check & state = 0 & timeout_counter = 3 : 1;
+      
+      -- Candidate becomes leader when having majority votes
+      active_flag & state = 1 & vote_count >= majority : 2;
+      
+      -- Any node becomes follower when receiving heartbeat with higher/equal term
+      active_flag & action_type = receive_heartbeat & 
+      all_nodes[receiver_id].state = 2 & all_nodes[receiver_id].current_term >= current_term : 0;
+      
+      -- Leader/candidate becomes follower when seeing higher term in vote request
+      active_flag & action_type = process_votes & 
+      voting_requests_id[0] != -1 & voting_requests_term[0] > current_term : 0;
+      
+      TRUE : state;
+    esac;
+    
+  -- Timeout counter logic
+  next(timeout_counter) := 
+    case
+      -- Reset counter when receiving valid heartbeat
+      active_flag & action_type = receive_heartbeat & 
+      all_nodes[receiver_id].state = 2 & all_nodes[receiver_id].current_term >= current_term : 0;
+      
+      -- Increment counter for followers (up to max)
+      active_flag & action_type = timeout_check & state = 0 & timeout_counter < 3 : 
+        timeout_counter + 1;
+      
+      -- Reset when not a follower
+      state != 0 : 0;
+      
+      TRUE : timeout_counter;
+    esac;
+    
+  -- Vote management
+  next(voted_for) :=
+    case
+      -- Vote for self when becoming candidate
+      active_flag & action_type = timeout_check & state = 0 & next(state) = 1 : id;
+      
+      -- Vote for others with higher term when processing vote requests
+      active_flag & action_type = process_votes & 
+      voting_requests_id[0] != -1 & voting_requests_id[0] != id &
+      voting_requests_term[0] > current_term &
+      (voted_for = -1 | current_term < voting_requests_term[0]) : 
+        voting_requests_id[0];
+        
+      -- Reset vote when term changes
+      next(current_term) > current_term : -1;
+      
+      TRUE : voted_for;
+    esac;
+    
+  -- Process voting request array - handle the first entry
+  next(voting_requests_id[0]) :=
+    case
+      -- Remove entry after processing
+      active_flag & action_type = process_votes & voting_requests_id[0] != -1 : -1;
+      
+      -- Add new request (from request_vote action)
+      !active_flag & action_type = request_vote & receiver_id = id : 
+        all_nodes[receiver_id].id;
+      
+      TRUE : voting_requests_id[0];
+    esac;
+    
+  next(voting_requests_term[0]) :=
+    case
+      -- Remove entry after processing
+      active_flag & action_type = process_votes & voting_requests_id[0] != -1 : 0;
+      
+      -- Add new request (from request_vote action)  
+      !active_flag & action_type = request_vote & receiver_id = id : 
+        all_nodes[receiver_id].current_term;
+      
+      TRUE : voting_requests_term[0];
+    esac;
+    
+  -- Shift the array entries after processing the first one
+  next(voting_requests_id[1]) :=
+    case
+      active_flag & action_type = process_votes & voting_requests_id[0] != -1 : 
+        voting_requests_id[1];
+      TRUE : voting_requests_id[1];
+    esac;
+    
+  next(voting_requests_id[2]) :=
+    case
+      active_flag & action_type = process_votes & voting_requests_id[0] != -1 : 
+        voting_requests_id[2];
+      TRUE : voting_requests_id[2];
+    esac;
+    
+  -- Track votes received
+  next(nodes_who_voted_for_me[0]) :=
+    case
+      -- Node 0 voted for this node when processing a vote request
+      all_nodes[0].id != id & all_nodes[0].active_flag & 
+      all_nodes[0].action_type = process_votes & 
+      all_nodes[0].voting_requests_id[0] = id & 
+      next(all_nodes[0].voted_for) = id : TRUE;
+      
+      -- Reset when term changes
+      next(current_term) > current_term : FALSE;
+      
+      TRUE : nodes_who_voted_for_me[0];
+    esac;
+    
+  -- Similar logic for tracking votes from other nodes
+  next(nodes_who_voted_for_me[1]) :=
+    case
+      all_nodes[1].id != id & all_nodes[1].active_flag & 
+      all_nodes[1].action_type = process_votes & 
+      all_nodes[1].voting_requests_id[0] = id & 
+      next(all_nodes[1].voted_for) = id : TRUE;
+      
+      next(current_term) > current_term : FALSE;
+      TRUE : nodes_who_voted_for_me[1];
+    esac;
+    
+  next(nodes_who_voted_for_me[2]) :=
+    case
+      all_nodes[2].id != id & all_nodes[2].active_flag & 
+      all_nodes[2].action_type = process_votes & 
+      all_nodes[2].voting_requests_id[0] = id & 
+      next(all_nodes[2].voted_for) = id : TRUE;
+      
+      next(current_term) > current_term : FALSE;
+      TRUE : nodes_who_voted_for_me[2];
+    esac;
+
+MODULE main
+VAR
+  -- Global action selection
+  active_node : 0..2;
+  action_type : {request_vote, process_votes, receive_heartbeat, timeout_check, do_nothing};
+  
+  -- Communication targets
+  receiver_id : 0..2; -- Target node for communication
+  
+  -- Create three node instances
+  node0 : node(0, active_node = 0, action_type, all_nodes, receiver_id);
+  node1 : node(1, active_node = 1, action_type, all_nodes, receiver_id);
+  node2 : node(2, active_node = 2, action_type, all_nodes, receiver_id);
+
+  -- Array of nodes (to allow nodes to access each other's state)
+  all_nodes : array 0..2 of process node(0, FALSE, do_nothing, all_nodes, 0);
+
+ASSIGN
+  -- Set up the all_nodes array
+  all_nodes[0] := node0;
+  all_nodes[1] := node1;
+  all_nodes[2] := node2;
+
+  -- Non-deterministic choices for each step
+  next(active_node) := {0, 1, 2};
+  
+  -- Action type based on node state
+  next(action_type) := 
+    case
+      -- Leaders can only send heartbeats
+      all_nodes[next(active_node)].state = 2 : {receive_heartbeat, do_nothing};
+      
+      -- Candidates can request votes or process their voting array
+      all_nodes[next(active_node)].state = 1 : 
+        {request_vote, process_votes, do_nothing};
+      
+      -- Followers can timeout, process votes, or receive heartbeats
+      all_nodes[next(active_node)].state = 0 : 
+        {process_votes, receive_heartbeat, timeout_check, do_nothing};
+      
+      TRUE : {do_nothing};
+    esac;
+  
+  -- Communication targets
+  next(receiver_id) :=
+    case
+      next(action_type) = request_vote | next(action_type) = receive_heartbeat : {0, 1, 2};
+      TRUE : next(active_node); -- Default to self
+    esac;
+
+-- Properties to check
+SPEC AG !(node0.state = 2 & node1.state = 2) -- No two nodes can be leaders simultaneously
+SPEC AG (node0.state = 1 & node0.vote_count >= node0.majority -> AF node0.state = 2) -- Candidate with majority becomes leader
+SPEC AG (node0.voted_for != -1 -> node0.voted_for <= 2) -- Voted_for is valid 

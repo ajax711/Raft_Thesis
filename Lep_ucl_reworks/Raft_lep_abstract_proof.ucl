@@ -1,0 +1,392 @@
+/* Raft Leader Election Protocol
+ * This model focuses on the leader election aspect of the Raft consensus protocol.
+ */
+
+module main {
+    // Node states
+    type state_t = enum { follower, candidate, leader };
+    
+    // Node IDs
+    type node_id_t = enum { n1, n2, n3, null };
+    
+    // Message types
+    type msg_type_t = enum { append_entries, request_vote, vote_response };
+    
+    // Message record structure
+    type message_t = record {
+        msg_type: msg_type_t,
+        src: node_id_t,
+        dst: node_id_t,
+        term: integer,
+    };
+    
+    // Constants
+    const NUM_NODES: integer = 3;
+    const MAJORITY: integer = 2; // Majority of 3 nodes
+    
+    // Global variables
+    var message_pool: [integer]message_t;  // Simulated network
+    var msg_pool_size: integer;
+    
+    // Per-node state
+    var state: [node_id_t]state_t;
+    var current_term: [node_id_t]integer;
+    var voted_for: [node_id_t]node_id_t;
+    var votes_received: [node_id_t]integer;
+    var timeout: [node_id_t]boolean;
+    var received_heartbeat: [node_id_t]boolean;
+    var active: [node_id_t]boolean;  // Whether the node is active or crashed
+    
+    // Initialize the system
+ 
+    
+    // Add a message to the message pool
+    procedure send_message(msg_type: msg_type_t, src: node_id_t, dst: node_id_t, term: integer)
+    modifies message_pool, msg_pool_size;
+    {
+        message_pool[msg_pool_size].msg_type = msg_type;
+        message_pool[msg_pool_size].src = src;
+        message_pool[msg_pool_size].dst = dst;
+        message_pool[msg_pool_size].term = term;
+        msg_pool_size = msg_pool_size + 1;
+    }
+    
+    // Leader sends heartbeats to all followers
+    procedure send_heartbeats(leader_id: node_id_t)
+    modifies message_pool, msg_pool_size;
+    {
+        var i: node_id_t;
+        var leader_term: integer;
+        
+        // Only active leaders can send heartbeats
+        if (active[leader_id] && state[leader_id] == leader) {
+            leader_term = current_term[leader_id];
+            
+            // Send to all other nodes
+            if (leader_id != n1 && active[n1]) {
+                call send_message(append_entries, leader_id, n1, leader_term);
+            }
+            if (leader_id != n2 && active[n2]) {
+                call send_message(append_entries, leader_id, n2, leader_term);
+            }
+            if (leader_id != n3 && active[n3]) {
+                call send_message(append_entries, leader_id, n3, leader_term);
+            }
+        }
+    }
+    
+    // Node requests votes from all other nodes
+    procedure request_votes(candidate_id: node_id_t)
+    modifies message_pool, msg_pool_size;
+    {
+        var candidate_term: integer;
+        
+        // Only active candidates can request votes
+        if (active[candidate_id] && state[candidate_id] == candidate) {
+            candidate_term = current_term[candidate_id];
+            
+            // Send RequestVote to all other nodes
+            if (candidate_id != n1 && active[n1]) {
+                call send_message(request_vote, candidate_id, n1, candidate_term);
+            }
+            if (candidate_id != n2 && active[n2]) {
+                call send_message(request_vote, candidate_id, n2, candidate_term);
+            }
+            if (candidate_id != n3 && active[n3]) {
+                call send_message(request_vote, candidate_id, n3, candidate_term);
+            }
+        }
+    }
+    
+    // Node responds to RequestVote RPC
+    procedure handle_vote_request(node_id: node_id_t, msg_idx: integer)
+    modifies voted_for, message_pool, msg_pool_size, current_term, state;
+    {
+        var src_id: node_id_t;
+        var request_term: integer;
+        var should_grant: boolean;
+        
+        src_id = message_pool[msg_idx].src;
+        request_term = message_pool[msg_idx].term;
+        
+        // Rule 1: If term > currentTerm, update currentTerm and become follower
+        if (request_term > current_term[node_id]) {
+            current_term[node_id] = request_term;
+            state[node_id] = follower;
+            voted_for[node_id] = null;
+        }
+        
+        // Check if we can grant the vote
+        should_grant = (request_term >= current_term[node_id]) && 
+                        (voted_for[node_id] == null || voted_for[node_id] == src_id);
+        
+        if (should_grant) {
+            voted_for[node_id] = src_id;
+            call send_message(vote_response, node_id, src_id, current_term[node_id]);
+        }
+    }
+    
+    // Node handles vote response
+    procedure handle_vote_response(node_id: node_id_t, msg_idx: integer)
+    modifies votes_received, state;
+    {
+        var src_id: node_id_t;
+        var response_term: integer;
+        
+        src_id = message_pool[msg_idx].src;
+        response_term = message_pool[msg_idx].term;
+        
+        // Only count the vote if we're still a candidate and terms match
+        if (state[node_id] == candidate && response_term == current_term[node_id]) {
+            votes_received[node_id] = votes_received[node_id] + 1;
+            
+            // If we have a majority, become leader
+            if (votes_received[node_id] >= MAJORITY) {
+                state[node_id] = leader;
+                call send_heartbeats(node_id);
+            }
+        }
+    }
+    
+    // Node handles append entries (heartbeat)
+    procedure handle_append_entries(node_id: node_id_t, msg_idx: integer)
+    modifies state, current_term, voted_for, received_heartbeat, votes_received;
+    {
+        var src_id: node_id_t;
+        var leader_term: integer;
+        
+        src_id = message_pool[msg_idx].src;
+        leader_term = message_pool[msg_idx].term;
+        
+        // Rule: If term < currentTerm, reject
+        if (leader_term < current_term[node_id]) {
+            // Reject (implicitly by doing nothing)
+        }
+        // Otherwise, accept heartbeat and become/stay follower
+        else {
+            // Update term if needed
+            if (leader_term > current_term[node_id]) {
+                current_term[node_id] = leader_term;
+                voted_for[node_id] = null;
+            }
+            
+            // Become follower if candidate or leader
+            if (state[node_id] != follower) {
+                state[node_id] = follower;
+                votes_received[node_id] = 0;
+            }
+            
+            // Mark that we received a heartbeat
+            received_heartbeat[node_id] = true;
+        }
+    }
+    
+    // Delivers and processes a message
+    procedure process_message(msg_idx: integer)
+    modifies state, current_term, voted_for, votes_received, received_heartbeat;
+    {
+        var msg_type: msg_type_t;
+        var dst_id: node_id_t;
+        
+        msg_type = message_pool[msg_idx].msg_type;
+        dst_id = message_pool[msg_idx].dst;
+        
+        // Process message based on type
+        if (active[dst_id]) {
+            if (msg_type == request_vote) {
+                call handle_vote_request(dst_id, msg_idx);
+            } else if (msg_type == vote_response) {
+                call handle_vote_response(dst_id, msg_idx);
+            } else if (msg_type == append_entries) {
+                call handle_append_entries(dst_id, msg_idx);
+            }
+        }
+    }
+    
+    // Non-deterministically timeout a node
+    procedure node_timeout(node_id: node_id_t)
+    modifies state, current_term, voted_for, votes_received, timeout, received_heartbeat;
+    {
+        // Only active followers and candidates can timeout
+        if (active[node_id] && (state[node_id] == follower || state[node_id] == candidate)) {
+            // Follower times out and starts election
+            if (state[node_id] == follower && !received_heartbeat[node_id]) {
+                current_term[node_id] = current_term[node_id] + 1;
+                state[node_id] = candidate;
+                voted_for[node_id] = node_id;  // Vote for self
+                votes_received[node_id] = 1;   // Count own vote
+                timeout[node_id] = false;      // Reset timeout
+                
+                call request_votes(node_id);
+            }
+            // Candidate times out and restarts election
+            else if (state[node_id] == candidate) {
+                current_term[node_id] = current_term[node_id] + 1;
+                voted_for[node_id] = node_id;  // Vote for self
+                votes_received[node_id] = 1;   // Reset to own vote
+                timeout[node_id] = false;      // Reset timeout
+                
+                call request_votes(node_id);
+            }
+        }
+    }
+    
+    // Non-deterministically crash a node
+    procedure crash_node(node_id: node_id_t)
+    modifies active;
+    {
+        if (active[node_id]) {
+            active[node_id] = false;
+        }
+    }
+    
+    // Non-deterministically recover a node
+    procedure recover_node(node_id: node_id_t)
+    modifies active, state, votes_received;
+    {
+        if (!active[node_id]) {
+            active[node_id] = true;
+            state[node_id] = follower;
+            votes_received[node_id] = 0;
+        }
+    }
+    
+    // Reset heartbeat received flags for next round
+    procedure reset_heartbeats()
+    modifies received_heartbeat;
+    {
+        received_heartbeat[n1] = (state[n1] == leader);  // Leaders don't need heartbeats
+        received_heartbeat[n2] = (state[n2] == leader);
+        received_heartbeat[n3] = (state[n3] == leader);
+    }
+       init {
+        // Initially n1 is the leader, others are followers
+        state[n1] = leader;
+        state[n2] = follower;
+        state[n3] = follower;
+        
+        // Initial terms
+        current_term[n1] = 1;
+        current_term[n2] = 1;
+        current_term[n3] = 1;
+        
+        // Initial votes
+        voted_for[n1] = n1;     // Leader voted for itself
+        voted_for[n2] = n1;     // Followers voted for leader
+        voted_for[n3] = n1;
+        
+        // Initial vote counts
+        votes_received[n1] = 3; // Leader has all votes
+        votes_received[n2] = 0;
+        votes_received[n3] = 0;
+        
+        // Initialize timeouts to false
+        timeout[n1] = false;
+        timeout[n2] = false;
+        timeout[n3] = false;
+        
+        // Initialize heartbeat received
+        received_heartbeat[n1] = true;  // Leader doesn't need heartbeats
+        received_heartbeat[n2] = true;  // Initially received from leader
+        received_heartbeat[n3] = true;
+        
+        // All nodes start active
+        active[n1] = true;
+        active[n2] = true;
+        active[n3] = true;
+        
+        // Empty message pool
+        msg_pool_size = 0;
+    }
+
+    
+    // Main next state transition
+    next {
+        var action: integer;
+        var node_idx: integer;
+        var msg_idx: integer;
+        
+        // Non-deterministically choose an action
+        havoc action;
+        
+        // Process a message
+        if (action == 0 && msg_pool_size > 0) {
+            havoc msg_idx;
+            assume(msg_idx >= 0 && msg_idx < msg_pool_size);
+            call process_message(msg_idx);
+        }
+        // Leader sends heartbeats
+        else if (action == 1) {
+            if (state[n1] == leader && active[n1]) {
+                call send_heartbeats(n1);
+            }
+            if (state[n2] == leader && active[n2]) {
+                call send_heartbeats(n2);
+            }
+            if (state[n3] == leader && active[n3]) {
+                call send_heartbeats(n3);
+            }
+        }
+        // Node timeout
+        else if (action == 2) {
+            havoc node_idx;
+            assume(node_idx >= 1 && node_idx <= 3);
+            
+            if (node_idx == 1) {
+                call node_timeout(n1);
+            } else if (node_idx == 2) {
+                call node_timeout(n2);
+            } else {
+                call node_timeout(n3);
+            }
+        }
+        // Node crash
+        else if (action == 3) {
+            havoc node_idx;
+            assume(node_idx >= 1 && node_idx <= 3);
+            
+            if (node_idx == 1) {
+                call crash_node(n1);
+            } else if (node_idx == 2) {
+                call crash_node(n2);
+            } else {
+                call crash_node(n3);
+            }
+        }
+        // Node recovery
+        else if (action == 4) {
+            havoc node_idx;
+            assume(node_idx >= 1 && node_idx <= 3);
+            
+            if (node_idx == 1) {
+                call recover_node(n1);
+            } else if (node_idx == 2) {
+                call recover_node(n2);
+            } else {
+                call recover_node(n3);
+            }
+        }
+        // Reset heartbeats for next round
+        else if (action == 5) {
+            call reset_heartbeats();
+        }
+        
+        // Non-deterministically set timeout flags
+        havoc timeout;
+    }
+    
+    // Safety property: at most one leader per term
+    invariant at_most_one_leader_per_term:
+        !(state[n1] == leader && state[n2] == leader && current_term[n1] == current_term[n2]) &&
+        !(state[n2] == leader && state[n3] == leader && current_term[n2] == current_term[n3]) &&
+        !(state[n1] == leader && state[n3] == leader && current_term[n1] == current_term[n3]);
+    
+    // Control command for verification
+    control {
+        v = induction(0);
+        check;
+        print_results;
+    }
+}
+
+

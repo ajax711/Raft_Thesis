@@ -1,0 +1,108 @@
+// Leader Election Protocol without Inbox
+module main {
+  // Types
+  type node_id_t = integer;
+  
+  // Constants
+  const n : integer; // Number of nodes
+  axiom (n > 2); // At least 3 nodes for meaningful consensus
+  
+  // Variables for each node (arrays indexed by node_id)
+  var current_term : [node_id_t]integer;
+  var voted_for : [node_id_t]integer;
+  var timeout : [node_id_t]boolean;
+  // lfc (Leader-Follower-Candidate) representation
+  var is_leader : [node_id_t]boolean;
+  var is_follower : [node_id_t]boolean;
+  var is_candidate : [node_id_t]boolean;
+  var rec_vote : [node_id_t]integer;
+  var rec_heart : [node_id_t]integer;
+  var rec_heart_term : [node_id_t]integer;
+  var node_active : [node_id_t]boolean;
+  var asking_vote : [node_id_t]integer;
+  var asking_term : [node_id_t]integer;
+  
+  // Initial state
+  init {
+    // Initialize each node explicitly
+    is_leader[0] = true;
+    is_follower[0] = false;
+    is_candidate[0] = false;
+    
+    is_leader[1] = false;
+    is_follower[1] = true;
+    is_candidate[1] = false;
+    
+    is_leader[2] = false;
+    is_follower[2] = true;
+    is_candidate[2] = false;
+    
+    // Initialize other variables for each node
+    current_term[0] = 0; current_term[1] = 0; current_term[2] = 0;
+    voted_for[0] = 0; voted_for[1] = 0; voted_for[2] = 0;
+    rec_heart[0] = 0; rec_heart[1] = 0; rec_heart[2] = 0;
+    timeout[0] = false; timeout[1] = false; timeout[2] = false;
+    rec_vote[0] = 0; rec_vote[1] = 0; rec_vote[2] = 0;
+    rec_heart_term[0] = 0; rec_heart_term[1] = 0; rec_heart_term[2] = 0;
+    node_active[0] = true; node_active[1] = true; node_active[2] = true;
+    asking_vote[0] = 0; asking_vote[1] = 0; asking_vote[2] = 0;
+    asking_term[0] = 0; asking_term[1] = 0; asking_term[2] = 0;
+  }
+  
+  procedure set_state(id: node_id_t, leader: boolean, follower: boolean, candidate: boolean)
+  modifies is_leader, is_follower, is_candidate;
+  {
+    is_leader[id] = leader;
+    is_follower[id] = follower;
+    is_candidate[id] = candidate;
+  }
+  
+  // Next state function with simplified transitions
+  next {
+    var choice : integer;
+    havoc choice;
+    assume(choice >= 0 && choice <= 1);
+    
+    if (choice == 0) {
+      // Crash a node
+      var crash_id : node_id_t;
+      havoc crash_id;
+      assume(crash_id >= 0 && crash_id < n);
+      node_active[crash_id] = false;
+    } else {
+      // Simple transition: Make a follower a candidate
+      var node_id : node_id_t;
+      havoc node_id;
+      assume(node_id >= 0 && node_id < n);
+      assume(is_follower[node_id]);
+      assume(node_active[node_id]);
+      
+      // Update state
+      call set_state(node_id, false, false, true);
+      current_term[node_id] = current_term[node_id] + 1;
+    }
+  }
+  
+  // Basic safety property using separate invariants for each node
+  invariant exclusive_state_0: (is_leader[0] && !is_follower[0] && !is_candidate[0]) || 
+                               (!is_leader[0] && is_follower[0] && !is_candidate[0]) ||
+                               (!is_leader[0] && !is_follower[0] && is_candidate[0]);
+  
+  invariant exclusive_state_1: (is_leader[1] && !is_follower[1] && !is_candidate[1]) || 
+                               (!is_leader[1] && is_follower[1] && !is_candidate[1]) ||
+                               (!is_leader[1] && !is_follower[1] && is_candidate[1]);
+  
+  invariant exclusive_state_2: (is_leader[2] && !is_follower[2] && !is_candidate[2]) || 
+                               (!is_leader[2] && is_follower[2] && !is_candidate[2]) ||
+                               (!is_leader[2] && !is_follower[2] && is_candidate[2]);
+  
+  // Leader uniqueness property
+  invariant at_most_one_leader_0_1: !(is_leader[0] && is_leader[1]);
+  invariant at_most_one_leader_0_2: !(is_leader[0] && is_leader[2]);
+  invariant at_most_one_leader_1_2: !(is_leader[1] && is_leader[2]);
+  
+  // Term-based leader uniqueness
+  invariant leader_term_uniqueness_0_1: (is_leader[0] && is_leader[1]) ==> (current_term[0] != current_term[1]);
+  invariant leader_term_uniqueness_0_2: (is_leader[0] && is_leader[2]) ==> (current_term[0] != current_term[2]);
+  invariant leader_term_uniqueness_1_2: (is_leader[1] && is_leader[2]) ==> (current_term[1] != current_term[2]);
+}
