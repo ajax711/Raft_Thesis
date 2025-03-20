@@ -7,7 +7,7 @@
 | `voted_for` | `int` or `null` | Candidate ID this node voted for in current term (null if none) |
 | `current_term` | `int` | Current term number the node is in |
 | `role` | `enum {Leader, Follower, Candidate}` | Current role of the node |
-| `votes_received` | `int` | Count of votes received (only relevant for candidates) |
+| `votes_received` | `array[int]` | Array tracking votes received from each node (only relevant for candidates) |
 | `timeout` | `boolean` | Whether the node has timed out |
 
 ## 2. Message Types
@@ -24,7 +24,7 @@
 - All other nodes start as followers with `role = Follower`
 - All nodes begin with `current_term = 1`
 - All nodes have `voted_for = null` initially
-- All nodes have `votes_received = 0`
+- All nodes have `votes_received = [0, 0, ..., 0]` (array of zeroes with length equal to number of nodes)
 - All inboxes are empty (`inbox = null`)
 - All nodes have `timeout = false`
 
@@ -41,7 +41,7 @@ inbox == null →
   current_term := current_term + 1
   voted_for := null  # Reset voted_for when term changes
   voted_for := node_id  # Then vote for self
-  votes_received := 1  # Count own vote
+  votes_received := [0, 0, ..., 0]  # Reset vote array
   role := Candidate
   broadcast(node, (Vr, current_term, node_id))
 ```
@@ -76,7 +76,7 @@ inbox == (Hb, term, sender_id) and term < current_term →
   voted_for := null  # Reset voted_for when term changes
   role := Candidate
   voted_for := node_id  # Then vote for self
-  votes_received := 1  # Count own vote
+  votes_received := [0, 0, ..., 0]  # Reset vote array
   broadcast(node, (Vr, current_term, node_id))
   inbox := null
 ```
@@ -96,7 +96,7 @@ inbox == (Hb, term, sender_id) and term > current_term →
   current_term := term
   role := Follower
   voted_for := null
-  votes_received := 0  # Reset vote count
+  votes_received := [0, 0, ..., 0]  # Reset vote array
   inbox := null
 ```
 
@@ -106,7 +106,7 @@ inbox == (Vr, term, sender_id) and term > current_term →
   current_term := term
   role := Follower
   voted_for := null
-  votes_received := 0  # Reset vote count
+  votes_received := [0, 0, ..., 0]  # Reset vote array
   inbox := null
 ```
 
@@ -117,9 +117,17 @@ inbox == (Vr, term, sender_id) and term > current_term →
 **Case 3.1**: Received vote
 ```
 inbox == (Vote, yes, sender_id) →
-  votes_received := votes_received + 1
-  if votes_received > number_of_nodes/2 then
-    votes_received := 0  # Reset vote count
+  votes_received[sender_id] := votes_received[sender_id] + 1  # Track vote from specific node
+  
+  # Count total votes (including possible duplicates)
+  total_votes := 0
+  for each i in range(number_of_nodes):
+    if votes_received[i] > 0:
+      total_votes := total_votes + 1
+  endfor
+  
+  if total_votes > number_of_nodes/2 then
+    votes_received := [0, 0, ..., 0]  # Reset vote array
     role := Leader
     broadcast(node, (Hb, current_term, node_id))
   else
@@ -134,7 +142,7 @@ inbox == (Hb, term, sender_id) and term > current_term →
   current_term := term
   role := Follower
   voted_for := null
-  votes_received := 0  # Reset vote count
+  votes_received := [0, 0, ..., 0]  # Reset vote array
   inbox := null
 ```
 
@@ -146,14 +154,14 @@ inbox == (Vr, term, sender_id) →
     role := Follower
     non_deterministic_change("voted_for", node_id, sender_id)  # Vote with amnesia
     send_message(node, sender_id, (Vote, yes, node_id))
-    votes_received := 0  # Reset vote count
+    votes_received := [0, 0, ..., 0]  # Reset vote array
   endif
   inbox := null
 ```
 
 **Case 3.4**: No quorum received yet
 ```
-if votes_received <= number_of_nodes/2 then
+if total_votes <= number_of_nodes/2 then
   broadcast(node, (Vr, current_term, node_id))
 endif
 ```

@@ -1,0 +1,462 @@
+MODULE main
+
+DEFINE
+  N := 3; -- Number of nodes
+  MAJORITY := N/2 + 1; -- Majority threshold
+
+VAR
+  -- Node parameters for all nodes
+  current_term : array 0..N-1 of 0..5;  -- Terms limited to 0-5 for state space reduction
+  voted_for : array 0..N-1 of -1..N-1;  -- -1 means null (no vote)
+  timeout : array 0..N-1 of boolean;    -- Timeout flag
+  
+  -- Leader/Follower/Candidate state: [1,0,0]=Leader, [0,1,0]=Follower, [0,0,1]=Candidate
+  lfc : array 0..N-1 of 0..2;  -- 0=Leader, 1=Follower, 2=Candidate (simplified from 3-bit vector)
+  
+  rec_vote : array 0..N-1 of 0..N;      -- Votes received (for candidates)
+  rec_heart : array 0..N-1 of 0..N-1;   -- Leader ID who sent heartbeat (0 if none)
+  rec_heart_term : array 0..N-1 of 0..5; -- Term of leader who sent heartbeat
+  node_active : array 0..N-1 of boolean; -- Node active status (simulates crashes)
+  
+  -- Vote request array - each node can have up to 2 pending vote requests
+  -- Each request contains (node_id, term)
+  ask_vote_node : array 0..N-1 of array 0..1 of 0..N-1; -- Requesting node IDs
+  ask_vote_term : array 0..N-1 of array 0..1 of 0..5;   -- Requesting terms
+  
+  -- Global scheduling variables
+  active_node : 0..N-1;        -- Which node is active
+  transition : 1..7;           -- Which transition to execute
+  
+  -- Used for nondeterministic choices
+  target_node : 0..N-1;        -- Target node for operations
+
+ASSIGN
+  -- Initial values
+  init(lfc[0]) := 0; -- Node 0 starts as leader
+  init(lfc[1]) := 1; -- Other nodes start as followers
+  init(lfc[2]) := 1;
+  
+  init(current_term[0]) := 0; -- All start at term 0
+  init(current_term[1]) := 0;
+  init(current_term[2]) := 0;
+  
+  init(voted_for[0]) := 0; -- All voted for initial leader (node 0)
+  init(voted_for[1]) := 0;
+  init(voted_for[2]) := 0;
+  
+  init(timeout[0]) := FALSE; -- No timeouts initially
+  init(timeout[1]) := FALSE;
+  init(timeout[2]) := FALSE;
+  
+  init(rec_vote[0]) := 0; -- No votes received initially
+  init(rec_vote[1]) := 0;
+  init(rec_vote[2]) := 0;
+  
+  init(rec_heart[0]) := 0; -- Leader's rec_heart is its own ID
+  init(rec_heart[1]) := 0; -- Followers' rec_heart is leader's ID
+  init(rec_heart[2]) := 0;
+  
+  init(rec_heart_term[0]) := 0; -- Initial heartbeat terms
+  init(rec_heart_term[1]) := 0;
+  init(rec_heart_term[2]) := 0;
+  
+  init(node_active[0]) := TRUE; -- All nodes start active
+  init(node_active[1]) := TRUE;
+  init(node_active[2]) := TRUE;
+  
+  -- Initialize vote request arrays to empty
+  init(ask_vote_node[0][0]) := 0;
+  init(ask_vote_node[0][1]) := 0;
+  init(ask_vote_node[1][0]) := 0;
+  init(ask_vote_node[1][1]) := 0;
+  init(ask_vote_node[2][0]) := 0;
+  init(ask_vote_node[2][1]) := 0;
+  
+  init(ask_vote_term[0][0]) := 0;
+  init(ask_vote_term[0][1]) := 0;
+  init(ask_vote_term[1][0]) := 0;
+  init(ask_vote_term[1][1]) := 0;
+  init(ask_vote_term[2][0]) := 0;
+  init(ask_vote_term[2][1]) := 0;
+  
+  -- Nondeterministic scheduling
+  next(active_node) := {0, 1, 2};
+  next(transition) := {1, 2, 3, 4, 5, 6, 7};
+  next(target_node) := {0, 1, 2};
+  
+  -- Node active status (random crashes/recoveries)
+  next(node_active[0]) := {TRUE, FALSE};
+  next(node_active[1]) := {TRUE, FALSE};
+  next(node_active[2]) := {TRUE, FALSE};
+  
+  -- T1: Leader Sends Heartbeats
+  next(rec_heart[0]) := 
+    case
+      transition = 1 & lfc[active_node] = 0 & node_active[active_node] & active_node = 0 & node_active[0]: 
+        active_node;
+      TRUE: rec_heart[0];
+    esac;
+  
+  next(rec_heart[1]) := 
+    case
+      transition = 1 & lfc[active_node] = 0 & node_active[active_node] & active_node != 1 & node_active[1]: 
+        active_node;
+      TRUE: rec_heart[1];
+    esac;
+    
+  next(rec_heart[2]) := 
+    case
+      transition = 1 & lfc[active_node] = 0 & node_active[active_node] & active_node != 2 & node_active[2]: 
+        active_node;
+      TRUE: rec_heart[2];
+    esac;
+  
+  next(rec_heart_term[0]) := 
+    case
+      transition = 1 & lfc[active_node] = 0 & node_active[active_node] & active_node = 0 & node_active[0]: 
+        current_term[active_node];
+      TRUE: rec_heart_term[0];
+    esac;
+    
+  next(rec_heart_term[1]) := 
+    case
+      transition = 1 & lfc[active_node] = 0 & node_active[active_node] & active_node != 1 & node_active[1]: 
+        current_term[active_node];
+      TRUE: rec_heart_term[1];
+    esac;
+    
+  next(rec_heart_term[2]) := 
+    case
+      transition = 1 & lfc[active_node] = 0 & node_active[active_node] & active_node != 2 & node_active[2]: 
+        current_term[active_node];
+      TRUE: rec_heart_term[2];
+    esac;
+  
+  next(timeout[0]) := 
+    case
+      -- Reset timeout when receiving valid heartbeat (part of T1)
+      transition = 1 & lfc[0] = 1 & node_active[0] & rec_heart[0] != 0 & rec_heart_term[0] >= current_term[0]: 
+        FALSE;
+      -- Set timeout when no heartbeat (T2)
+      transition = 2 & active_node = 0 & lfc[0] = 1 & node_active[0] & rec_heart[0] = 0: 
+        TRUE;
+      -- T3 starts here (reset timeout when becoming candidate)
+      transition = 3 & active_node = 0 & lfc[0] = 1 & timeout[0] & node_active[0]: 
+        FALSE;
+      TRUE: timeout[0];
+    esac;
+    
+  next(timeout[1]) := 
+    case
+      -- Reset timeout when receiving valid heartbeat (part of T1)
+      transition = 1 & lfc[1] = 1 & node_active[1] & rec_heart[1] != 0 & rec_heart_term[1] >= current_term[1]: 
+        FALSE;
+      -- Set timeout when no heartbeat (T2)
+      transition = 2 & active_node = 1 & lfc[1] = 1 & node_active[1] & rec_heart[1] = 0: 
+        TRUE;
+      -- T3 starts here (reset timeout when becoming candidate)
+      transition = 3 & active_node = 1 & lfc[1] = 1 & timeout[1] & node_active[1]: 
+        FALSE;
+      TRUE: timeout[1];
+    esac;
+    
+  next(timeout[2]) := 
+    case
+      -- Reset timeout when receiving valid heartbeat (part of T1)
+      transition = 1 & lfc[2] = 1 & node_active[2] & rec_heart[2] != 0 & rec_heart_term[2] >= current_term[2]: 
+        FALSE;
+      -- Set timeout when no heartbeat (T2)
+      transition = 2 & active_node = 2 & lfc[2] = 1 & node_active[2] & rec_heart[2] = 0: 
+        TRUE;
+      -- T3 starts here (reset timeout when becoming candidate)
+      transition = 3 & active_node = 2 & lfc[2] = 1 & timeout[2] & node_active[2]: 
+        FALSE;
+      TRUE: timeout[2];
+    esac;
+  
+  -- T2: Follower Checks Heartbeat (additional part - become candidate if leader term is lower)
+  next(lfc[0]) := 
+    case
+      -- T2: Follower becomes candidate if heartbeat term < current term
+      transition = 2 & active_node = 0 & lfc[0] = 1 & node_active[0] & rec_heart_term[0] < current_term[0]: 
+        2;
+      -- T3: Follower times out
+      transition = 3 & active_node = 0 & lfc[0] = 1 & timeout[0] & node_active[0]: 
+        2;
+      -- T6: Candidate becomes leader if it has majority votes
+      transition = 6 & active_node = 0 & lfc[0] = 2 & node_active[0] & rec_vote[0] >= MAJORITY: 
+        0;
+      -- T7: Revert to follower if see higher term
+      transition = 7 & active_node = 0 & node_active[0] & 
+      ((ask_vote_node[0][0] != 0 & ask_vote_term[0][0] > current_term[0]) | 
+       (ask_vote_node[0][1] != 0 & ask_vote_term[0][1] > current_term[0]) |
+       (rec_heart[0] != 0 & rec_heart_term[0] > current_term[0])): 
+        1;
+      TRUE: lfc[0];
+    esac;
+    
+  next(lfc[1]) := 
+    case
+      -- T2: Follower becomes candidate if heartbeat term < current term
+      transition = 2 & active_node = 1 & lfc[1] = 1 & node_active[1] & rec_heart_term[1] < current_term[1]: 
+        2;
+      -- T3: Follower times out
+      transition = 3 & active_node = 1 & lfc[1] = 1 & timeout[1] & node_active[1]: 
+        2;
+      -- T6: Candidate becomes leader if it has majority votes
+      transition = 6 & active_node = 1 & lfc[1] = 2 & node_active[1] & rec_vote[1] >= MAJORITY: 
+        0;
+      -- T7: Revert to follower if see higher term
+      transition = 7 & active_node = 1 & node_active[1] & 
+      ((ask_vote_node[1][0] != 0 & ask_vote_term[1][0] > current_term[1]) | 
+       (ask_vote_node[1][1] != 0 & ask_vote_term[1][1] > current_term[1]) |
+       (rec_heart[1] != 0 & rec_heart_term[1] > current_term[1])): 
+        1;
+      TRUE: lfc[1];
+    esac;
+    
+  next(lfc[2]) := 
+    case
+      -- T2: Follower becomes candidate if heartbeat term < current term
+      transition = 2 & active_node = 2 & lfc[2] = 1 & node_active[2] & rec_heart_term[2] < current_term[2]: 
+        2;
+      -- T3: Follower times out
+      transition = 3 & active_node = 2 & lfc[2] = 1 & timeout[2] & node_active[2]: 
+        2;
+      -- T6: Candidate becomes leader if it has majority votes
+      transition = 6 & active_node = 2 & lfc[2] = 2 & node_active[2] & rec_vote[2] >= MAJORITY: 
+        0;
+      -- T7: Revert to follower if see higher term
+      transition = 7 & active_node = 2 & node_active[2] & 
+      ((ask_vote_node[2][0] != 0 & ask_vote_term[2][0] > current_term[2]) | 
+       (ask_vote_node[2][1] != 0 & ask_vote_term[2][1] > current_term[2]) |
+       (rec_heart[2] != 0 & rec_heart_term[2] > current_term[2])): 
+        1;
+      TRUE: lfc[2];
+    esac;
+  
+  -- T3 and T7: Update terms
+  next(current_term[0]) := 
+    case
+      -- T3: Increment term when becoming candidate
+      transition = 3 & active_node = 0 & lfc[0] = 1 & timeout[0] & node_active[0]: 
+        min(current_term[0] + 1, 5);
+      -- T7: Update term if we see higher term
+      transition = 7 & active_node = 0 & node_active[0] & 
+      ask_vote_node[0][0] != 0 & ask_vote_term[0][0] > current_term[0]: 
+        ask_vote_term[0][0];
+      transition = 7 & active_node = 0 & node_active[0] & 
+      ask_vote_node[0][1] != 0 & ask_vote_term[0][1] > current_term[0]: 
+        ask_vote_term[0][1];
+      transition = 7 & active_node = 0 & node_active[0] & 
+      rec_heart[0] != 0 & rec_heart_term[0] > current_term[0]: 
+        rec_heart_term[0];
+      TRUE: current_term[0];
+    esac;
+    
+  next(current_term[1]) := 
+    case
+      -- T3: Increment term when becoming candidate
+      transition = 3 & active_node = 1 & lfc[1] = 1 & timeout[1] & node_active[1]: 
+        min(current_term[1] + 1, 5);
+      -- T7: Update term if we see higher term
+      transition = 7 & active_node = 1 & node_active[1] & 
+      ask_vote_node[1][0] != 0 & ask_vote_term[1][0] > current_term[1]: 
+        ask_vote_term[1][0];
+      transition = 7 & active_node = 1 & node_active[1] & 
+      ask_vote_node[1][1] != 0 & ask_vote_term[1][1] > current_term[1]: 
+        ask_vote_term[1][1];
+      transition = 7 & active_node = 1 & node_active[1] & 
+      rec_heart[1] != 0 & rec_heart_term[1] > current_term[1]: 
+        rec_heart_term[1];
+      TRUE: current_term[1];
+    esac;
+    
+  next(current_term[2]) := 
+    case
+      -- T3: Increment term when becoming candidate
+      transition = 3 & active_node = 2 & lfc[2] = 1 & timeout[2] & node_active[2]: 
+        min(current_term[2] + 1, 5);
+      -- T7: Update term if we see higher term
+      transition = 7 & active_node = 2 & node_active[2] & 
+      ask_vote_node[2][0] != 0 & ask_vote_term[2][0] > current_term[2]: 
+        ask_vote_term[2][0];
+      transition = 7 & active_node = 2 & node_active[2] & 
+      ask_vote_node[2][1] != 0 & ask_vote_term[2][1] > current_term[2]: 
+        ask_vote_term[2][1];
+      transition = 7 & active_node = 2 & node_active[2] & 
+      rec_heart[2] != 0 & rec_heart_term[2] > current_term[2]: 
+        rec_heart_term[2];
+      TRUE: current_term[2];
+    esac;
+  
+  -- T3 and T5: Vote management
+  next(voted_for[0]) := 
+    case
+      -- T3: Vote for self when becoming candidate
+      transition = 3 & active_node = 0 & lfc[0] = 1 & timeout[0] & node_active[0]: 
+        0;
+      -- T5: Grant vote if term >= current_term
+      transition = 5 & active_node = 0 & lfc[0] = 1 & node_active[0] & 
+      ask_vote_node[0][0] != 0 & ask_vote_term[0][0] >= current_term[0]: 
+        ask_vote_node[0][0];
+      -- T7: Reset vote if we see higher term
+      transition = 7 & active_node = 0 & node_active[0] & next(current_term[0]) > current_term[0]: 
+        -1;
+      TRUE: voted_for[0];
+    esac;
+    
+  next(voted_for[1]) := 
+    case
+      -- T3: Vote for self when becoming candidate
+      transition = 3 & active_node = 1 & lfc[1] = 1 & timeout[1] & node_active[1]: 
+        1;
+      -- T5: Grant vote if term >= current_term
+      transition = 5 & active_node = 1 & lfc[1] = 1 & node_active[1] & 
+      ask_vote_node[1][0] != 0 & ask_vote_term[1][0] >= current_term[1]: 
+        ask_vote_node[1][0];
+      -- T7: Reset vote if we see higher term
+      transition = 7 & active_node = 1 & node_active[1] & next(current_term[1]) > current_term[1]: 
+        -1;
+      TRUE: voted_for[1];
+    esac;
+    
+  next(voted_for[2]) := 
+    case
+      -- T3: Vote for self when becoming candidate
+      transition = 3 & active_node = 2 & lfc[2] = 1 & timeout[2] & node_active[2]: 
+        2;
+      -- T5: Grant vote if term >= current_term
+      transition = 5 & active_node = 2 & lfc[2] = 1 & node_active[2] & 
+      ask_vote_node[2][0] != 0 & ask_vote_term[2][0] >= current_term[2]: 
+        ask_vote_node[2][0];
+      -- T7: Reset vote if we see higher term
+      transition = 7 & active_node = 2 & node_active[2] & next(current_term[2]) > current_term[2]: 
+        -1;
+      TRUE: voted_for[2];
+    esac;
+  
+  -- T4 and T5: Vote request and counting
+  -- Request votes (T4)
+  next(ask_vote_node[0][0]) := 
+    case
+      -- Add vote request when candidate requests votes
+      transition = 4 & lfc[active_node] = 2 & node_active[active_node] & active_node != 0 & node_active[0]:
+        active_node;
+      -- Clear when processed
+      transition = 5 & active_node = 0 & node_active[0] & ask_vote_node[0][0] != 0:
+        0;
+      TRUE: ask_vote_node[0][0];
+    esac;
+    
+  next(ask_vote_term[0][0]) := 
+    case
+      -- Add vote request term when candidate requests votes
+      transition = 4 & lfc[active_node] = 2 & node_active[active_node] & active_node != 0 & node_active[0]:
+        current_term[active_node];
+      -- Clear when processed
+      transition = 5 & active_node = 0 & node_active[0] & ask_vote_node[0][0] != 0:
+        0;
+      TRUE: ask_vote_term[0][0];
+    esac;
+    
+  -- Similarly for other vote request arrays
+  next(ask_vote_node[1][0]) := 
+    case
+      transition = 4 & lfc[active_node] = 2 & node_active[active_node] & active_node != 1 & node_active[1]:
+        active_node;
+      transition = 5 & active_node = 1 & node_active[1] & ask_vote_node[1][0] != 0:
+        0;
+      TRUE: ask_vote_node[1][0];
+    esac;
+    
+  next(ask_vote_term[1][0]) := 
+    case
+      transition = 4 & lfc[active_node] = 2 & node_active[active_node] & active_node != 1 & node_active[1]:
+        current_term[active_node];
+      transition = 5 & active_node = 1 & node_active[1] & ask_vote_node[1][0] != 0:
+        0;
+      TRUE: ask_vote_term[1][0];
+    esac;
+    
+  next(ask_vote_node[2][0]) := 
+    case
+      transition = 4 & lfc[active_node] = 2 & node_active[active_node] & active_node != 2 & node_active[2]:
+        active_node;
+      transition = 5 & active_node = 2 & node_active[2] & ask_vote_node[2][0] != 0:
+        0;
+      TRUE: ask_vote_node[2][0];
+    esac;
+    
+  next(ask_vote_term[2][0]) := 
+    case
+      transition = 4 & lfc[active_node] = 2 & node_active[active_node] & active_node != 2 & node_active[2]:
+        current_term[active_node];
+      transition = 5 & active_node = 2 & node_active[2] & ask_vote_node[2][0] != 0:
+        0;
+      TRUE: ask_vote_term[2][0];
+    esac;
+    
+  -- Vote counting (T5 effect on candidates)
+  next(rec_vote[0]) := 
+    case
+      -- Initialize to 1 (self-vote) when becoming candidate
+      transition = 3 & active_node = 0 & lfc[0] = 1 & timeout[0] & node_active[0]:
+        1;
+      -- Increment when receiving vote
+      transition = 5 & node_active[0] & lfc[0] = 2 & 
+        ((active_node = 1 & next(voted_for[1]) = 0) | 
+         (active_node = 2 & next(voted_for[2]) = 0)):
+        min(rec_vote[0] + 1, N);
+      -- Reset when no longer candidate
+      next(lfc[0]) != 2:
+        0;
+      TRUE: rec_vote[0];
+    esac;
+    
+  next(rec_vote[1]) := 
+    case
+      -- Initialize to 1 (self-vote) when becoming candidate
+      transition = 3 & active_node = 1 & lfc[1] = 1 & timeout[1] & node_active[1]:
+        1;
+      -- Increment when receiving vote
+      transition = 5 & node_active[1] & lfc[1] = 2 & 
+        ((active_node = 0 & next(voted_for[0]) = 1) | 
+         (active_node = 2 & next(voted_for[2]) = 1)):
+        min(rec_vote[1] + 1, N);
+      -- Reset when no longer candidate
+      next(lfc[1]) != 2:
+        0;
+      TRUE: rec_vote[1];
+    esac;
+    
+  next(rec_vote[2]) := 
+    case
+      -- Initialize to 1 (self-vote) when becoming candidate
+      transition = 3 & active_node = 2 & lfc[2] = 1 & timeout[2] & node_active[2]:
+        1;
+      -- Increment when receiving vote
+      transition = 5 & node_active[2] & lfc[2] = 2 & 
+        ((active_node = 0 & next(voted_for[0]) = 2) | 
+         (active_node = 1 & next(voted_for[1]) = 2)):
+        min(rec_vote[2] + 1, N);
+      -- Reset when no longer candidate
+      next(lfc[2]) != 2:
+        0;
+      TRUE: rec_vote[2];
+    esac;
+
+-- Safety properties
+-- No two leaders in the same term
+SPEC AG !(lfc[0] = 0 & lfc[1] = 0 & current_term[0] = current_term[1])
+SPEC AG !(lfc[0] = 0 & lfc[2] = 0 & current_term[0] = current_term[2])
+SPEC AG !(lfc[1] = 0 & lfc[2] = 0 & current_term[1] = current_term[2])
+
+-- Replace the term properties with a single simpler property for each node
+SPEC AG (next(current_term[0]) >= current_term[0])
+SPEC AG (next(current_term[1]) >= current_term[1])
+SPEC AG (next(current_term[2]) >= current_term[2])
+
+-- Liveness property (with fairness assumption)
+FAIRNESS running
+SPEC AF (lfc[0] = 0 | lfc[1] = 0 | lfc[2] = 0) -- Eventually a leader will be elected 
