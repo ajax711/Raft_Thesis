@@ -209,11 +209,37 @@ function non_deterministic_change(variable_name, node_id, new_value):
       timeout := new_value
 ```
 
+Inbox-Constraint conditions. 
+
+| **Role**       | **Allowed Messages** | **Sender Role** | **Term Restrictions** | **FOL Condition** |
+|---------------|---------------------|----------------|----------------------|-------------------|
+| **Follower**   | Heartbeat           | Leader         | Any term ≤ max(all terms) | `(Hb, sender, t) ∧ sender.role = Leader ∧ t ≤ max(Terms)` |
+|               | Vote Request         | Candidate      | Any term ≤ max(all terms) | `(Vr, sender, t) ∧ sender.role = Candidate ∧ t ≤ max(Terms)` |
+|               | Vote Grant           | Follower       | Term < Follower's term | `(Vote, sender, t) ∧ sender.role = Follower ∧ t < current_term` |
+| **Candidate**  | Heartbeat           | Leader         | Any term ≤ max(all terms) | `(Hb, sender, t) ∧ sender.role = Leader ∧ t ≤ max(Terms)` |
+|               | Vote Grant           | Follower       | Term ≤ Candidate's term | `(Vote, sender, t) ∧ sender.role = Follower ∧ t ≤ current_term` |
+|               | Vote Request         | Candidate      | Any term ≤ max(all terms) | `(Vr, sender, t) ∧ sender.role = Candidate ∧ t ≤ max(Terms)` |
+| **Leader**     | Vote Grant          | Follower       | Term ≤ Leader’s term | `(Vote, sender, t) ∧ sender.role = Follower ∧ t ≤ current_term` |
+|               | Vote Request         | Candidate      | Any term ≤ max(all terms) | `(Vr, sender, t) ∧ sender.role = Candidate ∧ t ≤ max(Terms)` |
+|               | Heartbeat            | Leader         | Any term ≤ max(all terms) | `(Hb, sender, t) ∧ sender.role = Leader ∧ t ≤ max(Terms)` |
+
+
+
+
+
 ## Notes
 
-- Whatever changes we want to be non-deterministic we can do through the non-deterministic_change function 
-- I still havent added the node_active boolean, however i believe it is still covered if the non_determism is applied correctly. I believe it might need additions right now. 
+- Whatever changes we want to be non-deterministic we can do through the non-deterministic_change function. This makes it easier to make things deterministic and non deterministic. 
+- What to do when leader recieves a same term vote request? Is it even possible. 
 -  When a follower receives a heartbeat from a leader or a vote request from a candidate with a higher term, should it update its `current_term` immediately? I am doing that rn in this. 
+- Its good to leave the inbox a little liberal for experimentation at start ig. 
+- currently i havent removed the send message feature. The idea is to have an inbox with two cells, one with non determinsitic message constrained by the properties in the inbox-constrains table and second is the explicit messages sent by other nodes. A node can non-deter choose b/w two while reading inbox.
+
+
+
+
+
+## Note 2 
 -  We discussed in the meeting that when a follower sees a vote request but its votedFor is already something else in this node, it ignores the vote request. But when it sees the vote request again from the same node it has voted for, it sends the vote again? Then do inject the bug instead of counting multiple votes from the nodes as one vote, we just count all the votes. I believe this implmentation is wrong. 
 -Ideally what should happen is that after the votedFor has been set, no other votes can be sent from that node again. The only reason somehow a node sends vote again, is when it either forgets that it already voted, or when it thinks that the past vote didnt reach the reciever (according to the fuzzing raft paper). In this case, from the followers perspective its still sending only one valid legal vote. 
 - In this code I have implemented the latter one but the way I am making a node send two different votes is by making votedFor change non-deterministic and only having a single `int` variable tracking the number of votes a node got instead of an `arr` . However this doesnt just take care of dduplication bug, this also simulates the bug in which a node sends votes to two different nodes. Is this a problem? 
