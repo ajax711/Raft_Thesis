@@ -1,0 +1,67 @@
+MODULE philosopher(i,left,right)
+
+VAR
+	location: {think, request_right, request_left, have_right, have_left, eat, return};
+
+ASSIGN
+	init(location) := think;
+	next(location) := 
+		case
+			location=think : {think,request_left,request_right};
+			location=request_left & left=i: have_left;
+			location=have_left & right=i: eat;
+			location=request_right & right = i: have_right;
+			location=have_right & left = i: eat;
+			location=eat: {eat,return};
+			location=return: {think};
+			TRUE: location;
+		esac;
+	next(left) := 
+		case
+			location=return & i<3 : i+1;
+			location=return & i=3 : 0; 
+			TRUE : left; 
+		esac;
+	next(right) := 
+		case
+			location=return & i>0 : i - 1;
+			location=return & i=0 : 3;
+			TRUE: right;
+		esac;
+FAIRNESS running;
+FAIRNESS !(location=think);
+FAIRNESS !(location=eat);
+
+MODULE main
+
+VAR
+	sticks: array 0..3 of {0,1,2,3};
+	phil0: process philosopher(0,sticks[0],sticks[3]);
+	phil1: process philosopher(1,sticks[1],sticks[0]);
+	phil2: process philosopher(2,sticks[2],sticks[1]);
+	phil3: process philosopher(3,sticks[3],sticks[2]);
+ASSIGN
+	init(sticks[0]) := 0;
+	init(sticks[1]) := 2;
+	init(sticks[2]) := 2;
+	init(sticks[3]) := 0;
+-- These check if a philosopher is hungry (requesting chopsticks), they will eventually eat
+SPEC AG(phil0.location = request_left | phil0.location = request_right -> AF phil0.location = eat);
+SPEC AG(phil1.location = request_left | phil1.location = request_right -> AF phil1.location = eat);
+SPEC AG(phil2.location = request_left | phil2.location = request_right -> AF phil2.location = eat);
+SPEC AG(phil3.location = request_left | phil3.location = request_right -> AF phil3.location = eat);
+
+-- Additional starvation checks
+-- These check if from any state, it's always possible for each philosopher to eventually eat
+SPEC AG(EF(phil0.location = eat));
+SPEC AG(EF(phil1.location = eat));
+SPEC AG(EF(phil2.location = eat));
+SPEC AG(EF(phil3.location = eat));
+
+-- More complex starvation check - check if a philosopher has chopsticks
+-- but never gets to eat
+SPEC AG((phil0.location = have_left | phil0.location = have_right) -> AF phil0.location = eat);
+SPEC AG((phil1.location = have_left | phil1.location = have_right) -> AF phil1.location = eat);
+SPEC AG((phil2.location = have_left | phil2.location = have_right) -> AF phil2.location = eat);
+SPEC AG((phil3.location = have_left | phil3.location = have_right) -> AF phil3.location = eat);
+LTLSPEC G(!(phil0.location = eat & phil2.location = eat)); -- Obvious counter example I inserted. 

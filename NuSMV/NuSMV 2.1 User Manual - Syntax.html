@@ -1,0 +1,1019 @@
+<html><head>
+<meta http-equiv="content-type" content="text/html; charset=windows-1252">
+<!-- Created by texi2html 1.56k from nusmv.texi on 9 July 2002 -->
+
+<title>NuSMV 2.1 User Manual - Syntax</title>
+</head>
+<body>
+Go to the <a href="https://nusmv.fbk.eu/userman/v21/nusmv_1.html">first</a>, <a href="https://nusmv.fbk.eu/userman/v21/nusmv_2.html">previous</a>, <a href="https://nusmv.fbk.eu/userman/v21/nusmv_4.html">next</a>, <a href="https://nusmv.fbk.eu/userman/v21/nusmv_10.html">last</a> section, <a href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html">table of contents</a>.
+<p></p><hr><p>
+
+
+</p><h1><a name="SEC8" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC8">Syntax</a></h1>
+<p>
+<a name="IDX9"></a>
+
+
+</p><p>
+We present now the complete syntax of the input language of
+<code>NuSMV</code>. In the following, an <code>atom</code> may be any sequence of
+characters starting with a character in the set <code>{A-Za-z_}</code> and
+followed by a possibly empty sequence of characters belonging to the set
+<code>{A-Za-z0-9_\$#-}</code>.
+A <code>number</code> is any sequence of digits. A digit belongs to the set
+<code>{0-9}</code>.
+
+
+</p><p>
+All characters and case in a name are significant. Whitespace
+characters are space (<kbd><kbd>SPACE</kbd></kbd>), tab (<kbd><kbd>TAB</kbd></kbd>) and
+newline (<kbd><kbd>RET</kbd></kbd>).  @cindex comments in <code>NuSMV</code> language
+Any string starting with two dashes (<samp>`<kbd><code>--</code></kbd>'</samp>) and
+ending with a newline is a comment. Any other tokens recognized by the
+parser are enclosed in quotes in the syntax expressions below.
+Grammar productions enclosed in square brackets (<samp>`<code>[]</code>'</samp>) are
+optional.
+
+
+
+
+</p><h2><a name="SEC9" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC9">Expressions</a></h2>
+<p>
+<a name="IDX10"></a>
+
+
+</p><p>
+Expressions are constructed from variables, constants, and a collection
+of operators, including boolean connectives, integer arithmetic
+operators, case expressions and set expressions.
+
+
+
+
+</p><h3><a name="SEC10" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC10">Simple Expressions</a></h3>
+<p>
+<a name="IDX11"></a>
+
+
+</p><p>
+Simple expressions are expressions built only from current state
+variables. Simple expressions can be used to specify sets of states,
+e.g. the initial set of states. The syntax of simple expressions is as
+follows:
+
+
+
+</p><pre>simple_expr ::
+          atom                            ;; a symbolic constant
+        | number                          ;; a numeric constant
+        | "TRUE"                          ;; The boolean constant 1
+        | "FALSE"                         ;; The boolean constant 0
+        | var_id                          ;; a variable identifier
+        | "(" simple_expr ")"
+        | "!" simple_expr                 ;; logical not
+        | simple_expr "&amp;" simple_expr     ;; logical and
+        | simple_expr "|" simple_expr     ;; logical or
+        | simple_expr "xor" simple_expr   ;; logical exclusive or
+        | simple_expr "-&gt;" simple_expr    ;; logical implication
+        | simple_expr "&lt;-&gt;" simple_expr   ;; logical equivalence
+        | simple_expr "=" simple_expr     ;; equality
+        | simple_expr "!=" simple_expr    ;; inequality
+        | simple_expr "&lt;" simple_expr     ;; less than
+        | simple_expr "&gt;" simple_expr     ;; greater than
+        | simple_expr "&lt;=" simple_expr    ;; less than or equal
+        | simple_expr "&gt;=" simple_expr    ;; greater than or equal
+        | simple_expr "+" simple_expr     ;; integer addition
+        | simple_expr "-" simple_expr     ;; integer subtraction
+        | simple_expr "*" simple_expr     ;; integer multiplication
+        | simple_expr "/" simple_expr     ;; integer division
+        | simple_expr "mod" simple_expr   ;; integer remainder
+        | set_simple_expr                 ;; a set simple_expression
+        | case_simple_expr                ;; a case expression
+</pre>
+
+<p>
+A <em>var_id</em>, (see section <a href="https://nusmv.fbk.eu/userman/v21/nusmv_3.html#SEC25">Identifiers</a>) or identifier, is a symbol or
+expression which identifies an object, such as a variable or a defined
+symbol. Since a <code>var_id</code> can be an <code>atom</code>, there is a possible
+ambiguity if a variable or defined symbol has the same name as a
+symbolic constant. Such an ambiguity is flagged by the interpreter as an
+error.
+
+
+</p><p>
+The order of parsing precedence for operators from high to
+low is:
+
+</p><pre>*,/
++,-
+mod
+=,!=,&lt;,&gt;,&lt;=,&gt;=
+!
+&amp;
+|,xor
+&lt;-&gt;
+-&gt;
+</pre>
+
+<p>
+Operators of equal precedence associate to the left, except <code>-&gt;</code> that 
+associates to the right.
+Parentheses may be used to group expressions.
+
+
+
+
+</p><h4><a name="SEC11" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC11">Case Expressions</a></h4>
+<p>
+<a name="IDX12"></a>
+A case expression has the following syntax:
+
+</p><pre>case_simple_expr ::
+          "<code>case</code>"
+             simple_expr ":" simple_expr ";"
+             simple_expr ":" simple_expr ";"
+             ...
+             simple_expr ":" simple_expr ";"
+          "<code>esac</code>"
+</pre>
+
+<p>
+A <code>case_simple_expr</code> returns the value of the first expression on
+the right hand side of <samp>`<code>:</code>'</samp>, such that the corresponding
+condition on the left hand side evaluates to <code>1</code>. Thus, if
+<code>simple_expr</code> on the left side is true, then the result is the
+corresponding <code>simple_expr</code> on the right side. If none of the
+expressions on the left hand side evaluates to <code>1</code>, the result of
+the <code>case_expression</code> is the numeric value <code>1</code>. It is an error
+for any expression on the left hand side to return a value other than
+the truth values <code>0</code> or <code>1</code>.
+
+
+
+
+</p><h4><a name="SEC12" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC12">Set Expressions</a></h4>
+<p>
+<a name="IDX13"></a>
+A set expression has the following syntax:
+
+</p><pre>set_expr ::
+            "{" set_elem "," ... "," set_elem "}" ;; set definition
+         |  simple_expr "<code>in</code>" simple_expr          ;; set inclusion test
+         |  simple_expr "<code>union</code>" simple_expr       ;; set union
+set_elem :: simple_expr
+</pre>
+
+<p>
+A set can be defined by enumerating its elements inside
+curly braces <samp>`<code>{...}</code>'</samp>. The inclusion operator <samp>`<code>in</code>'</samp>
+tests a value for membership in a set. The union operator
+<samp>`<code>union</code>'</samp> takes the union of two sets. If either argument is a
+number or a symbolic value instead of a set, it is coerced to a
+singleton set.
+
+
+
+
+</p><h3><a name="SEC13" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC13">Next Expressions</a></h3>
+<p>
+<a name="IDX14"></a>
+
+
+</p><p>
+While simple expressions can represent sets of states, next expressions
+relate current and next state variables to express transitions in the
+FSM.  The structure of next expressions is similar to the
+structure of simple expressions (See section <a href="https://nusmv.fbk.eu/userman/v21/nusmv_3.html#SEC10">Simple Expressions</a>). The
+difference is that next expression allow to refer to next state
+variables. The grammar is depicted below.
+
+
+
+</p><pre>next_expr ::
+          atom                        ;; a symbolic constant
+        | number                      ;; a numeric constant
+        | "TRUE"                      ;; The boolean constant 1
+        | "FALSE"                     ;; The boolean constant 0
+        | var_id                      ;; a variable identifier
+        | "(" next_expr ")"
+        | "next" "(" simple_expr ")"  ;; next value of an "expression"
+        | "!" next_expr               ;; logical not
+        | next_expr "&amp;" next_expr     ;; logical and
+        | next_expr "|" next_expr     ;; logical or
+        | next_expr "xor" next_expr   ;; logical exclusive or
+        | next_expr "-&gt;" next_expr    ;; logical implication
+        | next_expr "&lt;-&gt;" next_expr   ;; logical equivalence
+        | next_expr "=" next_expr     ;; equality
+        | next_expr "!=" next_expr    ;; inequality
+        | next_expr "&lt;" next_expr     ;; less than
+        | next_expr "&gt;" next_expr     ;; greater than
+        | next_expr "&lt;=" next_expr    ;; less than or equal
+        | next_expr "&gt;=" next_expr    ;; greater than or equal
+        | next_expr "+" next_expr     ;; integer addition
+        | next_expr "-" next_expr     ;; integer subtraction
+        | next_expr "*" next_expr     ;; integer multiplication
+        | next_expr "/" next_expr     ;; integer division
+        | next_expr "mod" next_expr   ;; integer remainder
+        | set_next_expr               ;; a set next_expression
+        | case_next_expr              ;; a case expression
+</pre>
+
+<p>
+<code>set_next_expr</code> and <code>case_next_expr</code> are  the same
+as <code>set_simple_expr</code> (see section <a href="https://nusmv.fbk.eu/userman/v21/nusmv_3.html#SEC12">Set Expressions</a>) and
+<code>case_simple_expr</code> (see section <a href="https://nusmv.fbk.eu/userman/v21/nusmv_3.html#SEC11">Case Expressions</a>) respectively, with the
+replacement of "<code>simple</code>" with "<code>next</code>".
+The only additional production is <code>"next" "(" simple_expr ")"</code>,
+which allows to "shift" all the variables in <code>simple_expr</code> to the
+<em>next</em> state. The <code>next</code> operator distributes on every
+operator. For instance, the formula <code>next((A &amp; B) | C)</code> is a
+shorthand for the formula <code>(next(A) &amp; next(B)) | next(C)</code>. It is
+an error if in the scope of the <code>next</code> operator occurs another
+<code>next</code> operator.
+
+
+
+
+</p><h2><a name="SEC14" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC14">Definition of the FSM</a></h2>
+
+
+
+<h3><a name="SEC15" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC15">State Variables</a></h3>
+<p>
+<a name="IDX15"></a>
+<a name="IDX16"></a>
+
+
+</p><p>
+A state of the model is an assignment of values to a set of state
+variables. These variables (and also instances of modules) are declared
+by the notation:
+
+</p><pre>var_declaration :: "<code>VAR</code>"
+             atom ":" type ";"
+             atom ":" type ";"
+             ...
+</pre>
+
+<p>
+The type associated with a variable declaration can be either
+a boolean, a scalar, a user defined module, or an array of any of these
+(including arrays of arrays).
+
+
+
+
+</p><h4><a name="SEC16" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC16">Type Specifiers</a></h4>
+<p>
+<a name="IDX17"></a>
+<a name="IDX18"></a>
+
+
+</p><p>
+A type specifier has the syntax:
+
+</p><pre>type :: <code>boolean</code>
+     |  "{" val "," val "," ... val "}"
+     |  number ".." number
+     |  "<code>array</code>" number ".." number "<code>of</code>" type
+     |  atom [ "(" simple_expr "," simple_expr "," ...  ")" ]
+     |  "<code>process</code>" atom [ "(" simple_expr "," ... "," simple_expr ")" ]
+
+val  :: atom
+     |  number
+</pre>
+
+<p>
+A variable of type <code>boolean</code> can take on the numerical values
+<code>0</code> and <code>1</code> (representing false and true, respectively). In
+the case of a list of values enclosed in quotes (where atoms are taken
+to be symbolic constants), the variable is a scalar which take any of
+these values. In the case of an <code>array</code> declaration, the first
+<code>simple_expr</code> is the lower bound on the subscript and the second
+<code>simple_expr</code> is the upper bound. Both of these expressions must
+evaluate to integer constants. Finally, an atom optionally followed by
+a list of expressions in parentheses indicates an instance of module
+atom (See section <a href="https://nusmv.fbk.eu/userman/v21/nusmv_3.html#SEC24"><code>MODULE</code> declarations</a>). The keyword causes the module to
+be instantiated as an asynchronous process (See section <a href="https://nusmv.fbk.eu/userman/v21/nusmv_3.html#SEC27">Processes</a>).
+
+
+
+
+</p><h3><a name="SEC17" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC17">Input Variables</a></h3>
+<p>
+<a name="IDX19"></a>
+<a name="IDX20"></a>
+A state of the model is an assignment of values to a set of state
+variables. These variables (and also instances of modules) are declared
+by the notation:
+
+</p><pre>ivar_declaration :: "<code>IVAR</code>"
+             atom ":" type ";"
+             atom ":" type ";"
+             ...
+</pre>
+
+<p>
+The type associated with a variable declaration can be either
+a boolean, a scalar, a user defined module, or an array of any of these
+(including arrays of arrays) (See section <a href="https://nusmv.fbk.eu/userman/v21/nusmv_3.html#SEC15">State Variables</a>).
+
+
+
+
+</p><h3><a name="SEC18" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC18"><code>ASSIGN</code> declarations</a></h3>
+<p>
+An assignment  has the form:
+
+
+
+</p><pre>assign_declaration :: "<code>ASSIGN</code>"
+           assign_body ";"
+           assign_body ";"
+           ...
+
+assign_body ::
+           atom                ":=" simple_expr     ;; normal assignment
+         | "init" "(" atom ")" ":=" simple_expr     ;; init assignment
+         | "next" "(" atom ")" ":=" next_expr       ;; next assignment
+</pre>
+
+<p>
+On the left hand side of the assignment, atom denotes the
+current value of a variable, <samp>`init(atom)'</samp> denotes its initial
+value, and <samp>`next(atom)'</samp> denotes its value in the next state.  If
+the expression on the right hand side evaluates to an integer or
+symbolic constant, the assignment simply means that the left hand side
+is equal to the right hand side.  On the other hand, if the expression
+evaluates to a set, then the assignment means that the left hand side is
+contained in that set. It is an error if the value of the expression is
+not contained in the range of the variable on the left hand side.
+
+
+</p><p>
+In order for a program to be implementable, there must be some order in
+which the assignments can be executed such that no variable is assigned
+after its value is referenced. This is not the case if there is a
+circular dependency among the assignments in any given process. Hence,
+such a condition is an error. It is also an error for a variable to be
+assigned more than once at any given time. More precisely, it is
+an error if:
+
+</p><ol>
+<li>the next or current value of a variable is assigned more than once
+
+      in a given process, or
+</li><li>the initial value of a variable is assigned more than once in the
+
+      program, or
+</li><li>the current value and the initial value of a variable are both
+
+      assigned in the program, or
+</li><li>the current value and the next value of a variable are both
+
+      assigned in the program.
+</li></ol>
+
+
+
+<h3><a name="SEC19" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC19"><code>TRANS</code> declarations</a></h3>
+<p>
+<a name="IDX21"></a>
+The transition relation <em>R</em> of the model is a set of current state/next
+state pairs. Whether or not a given pair is in this set is determined by
+a boolean valued expression <em>T</em>, introduced by the <samp>`TRANS'</samp> keyword. The
+syntax of a <code>TRANS</code> declaration is:
+
+</p><pre>trans_declaration :: "<code>TRANS</code>" trans_expr [";"]
+
+trans_expr  :: next_expr
+</pre>
+
+<p>
+It is an error for the expression to yield any value other than <code>0</code>
+or <code>1</code>. If there is more than one <code>TRANS</code> declaration, the
+transition relation is the conjunction of all of <code>TRANS</code>
+declarations.
+
+
+
+
+</p><h3><a name="SEC20" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC20"><code>INIT</code> declarations</a></h3>
+<p>
+<a name="IDX22"></a>
+The set of initial states of the model is determined by a boolean expression
+under the <samp>`INIT'</samp> keyword. The syntax of a <code>INIT</code> declaration is:
+
+</p><pre>init_declaration :: "<code>INIT</code>" init_expr [";"]
+
+init_expr   :: simple_expr
+</pre>
+
+<p>
+It is an error for the expression to contain the <code>next()</code> operator,
+or to yield any value other than <code>0</code> or <code>1</code>. If there is more
+than one <code>INIT</code> declaration, the initial set is the conjunction of
+all of the <code>INIT</code> declarations.
+
+
+
+
+</p><h3><a name="SEC21" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC21"><code>INVAR</code> declarations</a></h3>
+<p>
+<a name="IDX23"></a>
+The set of invariant states (i.e. the analogous of normal assignments,
+as described in section <a href="https://nusmv.fbk.eu/userman/v21/nusmv_3.html#SEC18"><code>ASSIGN</code> declarations</a>) can be specified using a
+boolean expression under the <samp>`INVAR'</samp> keyword. The syntax of a
+<code>INVAR</code> declaration is:
+
+</p><pre>invar_declaration       :: "<code>INVAR</code>" invar_expr [";"]
+
+invar_expr     :: simple_expr
+</pre>
+
+<p>
+It is an error for the expression to contain the <code>next()</code> operator,
+or to yield any value other than <code>0</code> or <code>1</code>. If there is more
+than one <code>INVAR</code> declaration, the invariant set is the conjunction of
+all of the <code>INVAR</code> declarations.
+
+
+
+
+</p><h3><a name="SEC22" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC22"><code>DEFINE</code> declarations</a></h3>
+<p>
+<a name="IDX24"></a>
+In order to make descriptions more concise, a symbol can be associated
+with a commonly expression. The syntax for this kind of declaration is:
+
+</p><pre>define_declaration :: "<code>DEFINE</code>"
+                    atom ":=" simple_expr ";"
+                    atom ":=" simple_expr ";"
+                    ...
+                    atom ":=" simple_expr ";"
+</pre>
+
+<p>
+Whenever an identifier referring to the symbol on the left hand side of
+the <samp>`<code>:=</code>'</samp> in a <code>DEFINE</code> occurs in an expression, it is
+replaced by the expression on the right hand side. The expression on the
+right hand side is always evaluated in its context, however
+(see section <a href="https://nusmv.fbk.eu/userman/v21/nusmv_3.html#SEC24"><code>MODULE</code> declarations</a> for an explanation of contexts). Forward
+references to defined symbols are allowed, but circular definitions are not
+allowed, and result in an error.
+
+
+</p><p>
+It is not possible to assign values to defined symbols non-deterministically. 
+Another difference between defined symbols and variables is that while variables
+are statically typed, definitions are not.
+
+
+
+
+</p><h3><a name="SEC23" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC23"><code>ISA</code> declarations</a></h3>
+<p>
+<a name="IDX25"></a>
+There are cases in which some parts of a module could be shared among
+different modules, or could be used as a module themselves. In
+<code>NuSMV</code> it is possible to declare the common parts as separate
+modules, and then use the <code>ISA</code> declaration to import the common
+parts inside a module declaration.
+
+
+</p><p>
+The syntax of an <code>ISA</code> declaration is as follows:
+
+</p><pre>isa_declaration :: "<code>ISA</code>" atom
+</pre>
+
+<p>
+where <code>atom</code> must be the name of a declared module.
+The <code>ISA</code> declaration can be thought as a simple macro expansion
+command, because the body of the module referenced by an <code>ISA</code>
+command is replaced to the <code>ISA</code> declaration.
+
+
+
+
+</p><h3><a name="SEC24" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC24"><code>MODULE</code> declarations</a></h3>
+<p>
+<a name="IDX26"></a>
+A module is an encapsulated collection of declarations. Once defined,
+a module can be reused as many times as necessary. Modules can also be
+so that each instance of a module can refer to different data
+values. A module can contain instances of other modules, allowing a
+structural hierarchy to be built.
+
+
+</p><p>
+The syntax of a module declaration is as follows.
+
+
+
+</p><pre>module ::
+        "<code>MODULE</code>" atom [ "(" atom "," atom "," ... atom ")" ]
+        [ var_declaration        ]
+        [ ivar_declaration       ]
+        [ assign_declaration     ]
+        [ trans_declaration      ]
+        [ init_declaration       ]
+        [ invar_declaration      ]
+        [ spec_declaration       ]
+        [ checkinvar_declaration ]
+        [ ltlspec_declaration    ]
+        [ compute_declaration    ]
+        [ fairness_declaration   ]
+        [ define_declaration     ]
+        [ isa_declaration        ]
+</pre>
+
+<p>
+The <em>atom</em> immediately following the keyword "<code>MODULE</code>" is
+the name associated with the module. Module names are drawn from a
+separate name space from other names in the program, and hence may
+clash with names of variables and definitions. The optional list of
+atoms in parentheses are the formal parameters of the module. Whenever
+these parameters occur in expressions within the module, they are
+replaced by the actual parameters which are supplied when the module
+is instantiated (see below).
+
+
+</p><p>
+An <em>instance</em> of a module is created using the <code>VAR</code>
+declaration (see section <a href="https://nusmv.fbk.eu/userman/v21/nusmv_3.html#SEC15">State Variables</a>). This declaration supplies a name
+for the instance, and also a list of actual parameters, which are
+assigned to the formal parameters in the module definition. An actual
+parameter can be any legal expression. It is an error if the number of
+actual parameters is different from the number of formal
+parameters. The semantic of module instantiation is similar to
+call-by-reference. For example, in the following program fragment:
+
+</p><pre>MODULE main
+...
+ VAR
+  a : boolean;
+  b : foo(a);
+...
+MODULE foo(x)
+ ASSIGN
+   x := 1;
+</pre>
+
+<p>
+the variable <code>a</code> is assigned the value <code>1</code>. This
+distinguishes the call-by-reference mechanism from a call-by-value
+scheme.
+
+
+</p><p>
+Now consider the following program:
+
+</p><pre>MODULE main
+...
+ DEFINE
+   a := 0;
+ VAR
+   b : bar(a);
+...
+MODULE bar(x)
+ DEFINE
+   a := 1;
+   y := x;
+</pre>
+
+<p>
+In this program, the value of <code>y</code> is <code>0</code>. On the
+other hand, using a call-by-name mechanism, the value of <code>y</code> would
+be <code>1</code>, since <code>a</code> would be substituted as an expression for
+<code>x</code>.
+
+
+</p><p>
+Forward references to module names are allowed, but circular
+references are not, and result in an error.
+
+
+
+
+</p><h3><a name="SEC25" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC25">Identifiers</a></h3>
+<p>
+<a name="IDX27"></a>
+
+
+</p><p>
+An <code>id</code>, or identifier, is an expression which references an
+object. Objects are instances of modules, variables, and defined
+symbols. The syntax of an identifier is as follows.
+
+</p><pre>id ::
+        atom
+        | "self"
+        | id "." atom
+        | id "[" simple_expr "]"
+</pre>
+
+<p>
+An <em>atom</em> identifies the object of that name as defined in a
+<code>VAR</code> or <code>DEFINE</code> declaration. If <code>a</code> identifies an
+instance of a module, then the expression <samp>`a.b'</samp> identifies
+the component object named <samp>`b'</samp> of instance <samp>`a'</samp>. This
+is precisely analogous to accessing a component of a structured data
+type. Note that an actual parameter of module <samp>`a'</samp> can
+identify another module instance <samp>`b'</samp>, allowing <samp>`a'</samp>
+to access components of <samp>`b'</samp>, as in the following example:
+
+
+
+</p><pre>...  VAR
+  a : foo(b);
+  b : bar(a);
+...
+
+MODULE foo(x)
+ DEFINE
+   c := x.p | x.q;
+
+MODULE bar(x)
+ VAR
+   p : boolean;
+   q : boolean;
+</pre>
+
+<p>
+Here, the value of <samp>`c'</samp> is the logical or of <samp>`p'</samp> and
+<samp>`q'</samp>.
+
+
+</p><p>
+If <samp>`a'</samp> identifies an array, the expression <samp>`a[b]'</samp>
+identifies element <samp>`b'</samp> of array <samp>`a'</samp>. It is an error
+for the expression <samp>`b'</samp> to evaluate to a number outside the
+subscript bounds of array <samp>`a'</samp>, or to a symbolic value.
+
+
+</p><p>
+It is possible to refer the name the current module has been
+instantiated to by using the <code>self</code> builtin identifier.
+<a name="IDX28"></a>
+
+</p><pre>MODULE element(above, below, token)
+ VAR
+   Token : boolean;
+
+ ASSIGN
+   init(Token) := token;
+   next(Token) := token-in;
+
+ DEFINE
+   above.token-in := Token;
+   grant-out := below.grant-out;
+
+MODULE cell
+ VAR
+   e2 : element(self,   e1, 0);
+   e1 : element(e1  , self, 1);
+
+ DEFINE
+   e1.token-in := token-in;
+   grant-out := grant-in &amp; !e1.grant-out;
+
+MODULE main
+ VAR c1 : cell;
+</pre>
+
+<p>
+In this example the name the <code>cell</code> module has been instantiated to
+is passed to the submodule <code>element</code>. In the <code>main</code> module,
+declaring <code>c1</code> to be an instance of module <code>cell</code> and defining
+<code>above.token-in</code> in module <code>e2</code>, really amounts to defining
+the symbol <code>c1.token-in</code>. When you, in the <code>cell</code> module,
+declare <code>e1</code> to be an instance of module <code>element</code>, and you
+define <code>grant-out</code> in module <code>e1</code> to be
+<code>below.grant-out</code>, you are really defining it to be the symbol
+<code>c1.grant-out</code>.
+
+
+
+
+</p><h3><a name="SEC26" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC26">The <code>main</code> module</a></h3>
+<p>
+<a name="IDX29"></a>
+
+
+</p><p>
+The syntax of a <code>NuSMV</code> program is:
+
+</p><pre>program ::
+        module_1
+        module_2
+        ...
+        module_n
+</pre>
+
+<p>
+There must be one module with the name <code>main</code> and no formal parameters.
+The module <code>main</code> is the one evaluated by the interpreter.
+
+
+
+
+</p><h3><a name="SEC27" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC27">Processes</a></h3>
+<p>
+<a name="IDX30"></a>
+<a name="IDX31"></a>
+
+
+</p><p>
+Processes are used to model interleaving concurrency. A <em>process</em>
+is a module which is instantiated using the keyword <samp>`process'</samp>
+(see section <a href="https://nusmv.fbk.eu/userman/v21/nusmv_3.html#SEC15">State Variables</a>). The program executes a step by
+non-deterministically choosing a process, then executing all of the
+assignment statements in that process in parallel. It is implicit that
+if a given variable is not assigned by the process, then its value
+remains unchanged. Each instance of a process has a special boolean
+variable associated with it called <code>running</code>.
+<a name="IDX32"></a>
+The value of this variable is <code>1</code> if and only if the process
+instance is currently selected for execution.
+A process may run only when its parent is running. In addition no two
+processes with the same parents may be running at the same time.
+
+
+
+
+</p><h3><a name="SEC28" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC28"><code>FAIRNESS</code> declarations</a></h3>
+<p>
+<a name="IDX33"></a>
+<a name="IDX34"></a>
+<a name="IDX35"></a>
+<a name="IDX36"></a>
+<a name="IDX37"></a>
+<a name="IDX38"></a>
+A <em>fairness constraint</em> restricts the attention only to <em>fair
+execution paths</em>.  When evaluating specifications, the model checker
+considers path quantifiers to apply only to fair paths.
+
+
+</p><p>
+<code>NuSMV</code> supports two types of fairness constraints, namely justice
+constraints and compassion constraints.
+A <em>justice constraint</em> consists of a formula <code>f</code> which is
+assumed to be true infinitely often in all the fair paths. In
+<code>NuSMV</code> justice constraints are identified by keywords
+<code>JUSTICE</code> and, for backward compatibility, <code>FAIRNESS</code>.
+A <em>compassion constraint</em> consists of a pair of formulas
+<code>(p,q)</code>; if property <code>p</code> is true infinitely often in a fair
+path, then also formula <code>q</code> has to be true infinitely often in the
+fair path. In <code>NuSMV</code> compassion constraints are identified by
+keyword <code>COMPASSION</code>.<a name="DOCF3" href="https://nusmv.fbk.eu/userman/v21/nusmv_foot.html#FOOT3">(3)</a>
+
+
+</p><p>
+Fairness constraints are declared using the following syntax:
+
+</p><pre>fairness_declaration :: 
+             "<code>FAIRNESS</code>" simple_expr [";"]
+           | "<code>JUSTICE</code>" simple_expr [";"]
+           | "<code>COMPASSION</code>" "(" simple_expr "," simple_expr ")" [";"]
+</pre>
+
+<p>
+A path is considered fair if and only if it satisfies all the
+constraints declared in this manner.
+
+
+
+
+</p><h2><a name="SEC29" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC29">Specifications</a></h2>
+
+<p>
+The specifications to be checked on the FSM can be
+expressed in two different temporal logics: the Computation Tree Logic
+CTL, and the Linear Temporal Logic LTL extended with Past Operators. It
+is also possible to analyze quantitative characteristics of the FSM
+by specifying real-time CTL specifications. Specifications can
+be positioned within modules, in which case they are preprocessed to
+rename the variables according to the containing context.
+
+
+</p><p>
+CTL and LTL specifications are evaluated by <code>NuSMV</code> in order to
+determine their truth or falsity in the FSM. When a
+specification is discovered to be false, <code>NuSMV</code> constructs and
+prints a counterexample, i.e. a trace of the FSM that
+falsifies the property.
+
+
+
+
+</p><h3><a name="SEC30" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC30">CTL Specifications</a></h3>
+<p>
+<a name="IDX39"></a>
+
+
+</p><p>
+A CTL specification is given as a formula in the temporal logic CTL,
+introduced by the keyword <samp>`SPEC'</samp>. The syntax of this declaration
+is:
+
+
+
+</p><pre>spec_declaration :: "<code>SPEC</code>" spec_expr [";"]
+
+spec_expr   :: ctl_expr
+</pre>
+
+<p>
+The syntax of CTL formulas recognized by the <code>NuSMV</code> parser is
+as follows:
+
+</p><pre>ctl_expr ::
+        simple_expr                 ;; a simple boolean expression
+        | "(" ctl_expr ")"
+        | "!" ctl_expr              ;; logical not
+        | ctl_expr "&amp;" ctl_expr     ;; logical and
+        | ctl_expr "|" ctl_expr     ;; logical or
+        | ctl_expr "xor" ctl_expr   ;; logical exclusive or
+        | ctl_expr "-&gt;" ctl_expr    ;; logical implies
+        | ctl_expr "&lt;-&gt;" ctl_expr   ;; logical equivalence
+        | "EG" ctl_expr             ;; exists globally
+        | "EX" ctl_expr             ;; exists next state
+        | "EF" ctl_expr             ;; exists finally
+        | "AG" ctl_expr             ;; forall globally
+        | "AX" ctl_expr             ;; forall next state
+        | "AF" ctl_expr             ;; forall finally
+        | "E" "[" ctl_expr "U" ctl_expr "]" ;; exists until
+        | "A" "[" ctl_expr "U" ctl_expr "]" ;; forall until
+</pre>
+
+<p>
+It is an error for an expressions in a CTL formula to contain a
+<samp>`next()'</samp> operator, or to have non-boolean components, i.e.
+subformulas which evaluate to a value other than <code>0</code> or <code>1</code>.
+
+
+</p><p>
+It is also possible to specify invariants, i.e. propositional formulas
+which must hold invariantly in the model. The corresponding command is
+<samp>`INVARSPEC'</samp>, with syntax:
+
+</p><pre>checkinvar_declaration :: "<code>INVARSPEC</code>" simple_expr ";"
+</pre>
+
+<p>
+This statement corresponds to
+
+</p><pre>SPEC  AG simple_expr ";"
+</pre>
+
+<p>
+but can be checked by a specialized algorithm during reachability
+analysis.
+
+
+
+
+</p><h3><a name="SEC31" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC31">LTL Specifications</a></h3>
+<p>
+<a name="IDX40"></a>
+
+
+</p><p>
+LTL specifications are introduced by the keyword <samp>`LTLSPEC'</samp>. The syntax
+of this declaration is:
+
+</p><pre>ltlspec_declaration :: "<code>LTLSPEC</code>" ltl_expr [";"]
+</pre>
+
+<p>
+where
+
+
+
+</p><pre>ltl_expr ::
+        simple_expr                ;; a simple boolean expression
+        | "(" ltl_expr ")"
+        | "!" ltl_expr             ;; logical not
+        | ltl_expr "&amp;" ltl_expr    ;; logical and
+        | ltl_expr "|" ltl_expr    ;; logical or
+        | ltl_expr "xor" ltl_expr  ;; logical exclusive or
+        | ltl_expr "-&gt;" ltl_expr   ;; logical implies
+        | ltl_expr "&lt;-&gt;" ltl_expr  ;; logical equivalence
+        ;; FUTURE
+        | "X" ltl_expr             ;; next state
+        | "G" ltl_expr             ;; globally
+        | "F" ltl_expr             ;; finally
+        | ltl_expr "U" ltl_expr    ;; until
+        | ltl_expr "V" ltl_expr    ;; releases
+        ;; PAST
+        | "Y" ltl_expr             ;; previous state
+        | "Z" ltl_expr             ;; not previous state not
+        | "H" ltl_expr             ;; historically
+        | "O" ltl_expr             ;; once 
+        | ltl_expr "S" ltl_expr    ;; since
+        | ltl_expr "T" ltl_expr    ;; triggered
+</pre>
+
+<p>
+In <code>NuSMV</code>, LTL specifications can be analyzed both by means of
+BDD-based reasoning, or by means of SAT-based bounded model checking. In
+the first case, <code>NuSMV</code> proceeds along the lines described in
+<cite><a href="https://nusmv.fbk.eu/userman/v21/nusmv_6.html#BIB3">[CGH97]</a></cite>. For each LTL specification, a tableau able to recognize
+the behaviors falsifying the property is constructed, and then
+synchronously composed with the model. With respect to <cite><a href="https://nusmv.fbk.eu/userman/v21/nusmv_6.html#BIB3">[CGH97]</a></cite>,
+the approach is fully integrated within <code>NuSMV</code>, and allows for
+full treatment of past temporal operators.  In the
+case of BDD-based reasoning, the counterexample generated to show the
+falsity of a LTL specification may contain state variables which have
+been introduced by the tableau construction procedure.
+
+
+</p><p>
+In the second case, a similar tableau construction is carried out to
+encode the existence of a path of limited length violating the
+property. <code>NuSMV</code> generates a propositional satisfiability problem,
+that is then tackled by means of an efficient SAT solver <cite><a href="https://nusmv.fbk.eu/userman/v21/nusmv_6.html#BIB1">[BCCZ99]</a></cite>.
+
+
+</p><p>
+In both cases, the tableau constructions are completely transparent to
+the user.
+
+
+
+
+</p><h3><a name="SEC32" href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html#TOC32">Real Time CTL Specifications and Computations</a></h3>
+<p>
+<a name="IDX41"></a>
+
+
+</p><p>
+<code>NuSMV</code> allows for Real Time CTL specifications
+<cite>[EMSS90]</cite>. <code>NuSMV</code> assumes that each transition takes unit
+time for execution. RTCTL extends the syntax of CTL path expressions
+with the following bounded modalities:
+
+</p><pre>rtctl_expr ::
+        ctl_expr
+      | "EBF" range rtctl_expr
+      | "ABF" range rtctl_expr
+      | "EBG" range rtctl_expr
+      | "ABG" range rtctl_expr
+      | "A" "[" rtctl_expr "BU" range rtctl_expr "]"
+      | "E" "[" rtctl_expr "BU" range rtctl_expr "]"
+
+range  :: number ".." number"
+</pre>
+
+<p>
+Intuitively, in the formula <code>E [ <i>a</i> BU <i>m</i>..<i>n</i> <i>b</i> ]</code>
+<i>m</i> (<i>n</i>, resp.) represents the minimum (maximum) number of
+permitted transition along a path of a structure before the eventuality
+holds.
+
+
+</p><p>
+Real time CTL specifications can be defined with the following syntax,
+which extends the syntax for CTL specifications.
+
+</p><pre>spec_declaration :: "<code>SPEC</code>" rtctl_expr [";"]
+</pre>
+
+<p>
+With the <samp>`COMPUTE'</samp> statement, it is also possible to compute
+quantitative information on the FSM. In particular, it is
+possible to compute the exact bound on the delay between two specified
+events, expressed as CTL formulas. The syntax is the following:
+
+</p><pre>compute_declaration :: "<code>COMPUTE</code>" compute_expr [";"]
+</pre>
+
+<p>
+where
+
+</p><pre>compute_expr ::
+             "MIN" "[" rtctl_expr "," rtctl_expr "]"
+           | "MAX" "[" rtctl_expr "," rtctl_expr "]"
+</pre>
+
+<p>
+<code>MIN [<i>start , final</i>]</code> computes the set of
+states reachable from <i>start</i>. If at any point, we encounter a state
+satisfying <i>final</i>, we return the number of steps taken to reach the
+state. If a fixed point is reached and no states intersect <i>final</i>
+then <em>infinity</em> is returned.
+
+
+</p><p>
+<code>MAX [<i>start , final</i>]</code> returns the length of
+the longest path from a state in <i>start</i> to a state in <i>final</i>. If
+there exists an infinite path beginning in a state in <i>start</i> that
+never reaches a state in <i>final</i>, then <i>infinity</i> is returned.
+
+
+</p><p></p><hr><p>
+Go to the <a href="https://nusmv.fbk.eu/userman/v21/nusmv_1.html">first</a>, <a href="https://nusmv.fbk.eu/userman/v21/nusmv_2.html">previous</a>, <a href="https://nusmv.fbk.eu/userman/v21/nusmv_4.html">next</a>, <a href="https://nusmv.fbk.eu/userman/v21/nusmv_10.html">last</a> section, <a href="https://nusmv.fbk.eu/userman/v21/nusmv_toc.html">table of contents</a>.
+
+
+</p></body></html>

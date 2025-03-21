@@ -235,8 +235,20 @@ Inbox-Constraint conditions.
 - Its good to leave the inbox a little liberal for experimentation at start ig. 
 - currently i havent removed the send message feature. The idea is to have an inbox with two cells, one with non determinsitic message constrained by the properties in the inbox-constrains table and second is the explicit messages sent by other nodes. A node can non-deter choose b/w two while reading inbox.
 
+- A follower should reset its timeout on receiving a valid heartbeat.
+- Currently, `timeout := false` is correctly set in Case 1.3, but the timeout logic should be explicitly reset to prevent unnecessary elections.
 
+- If a follower receives a heartbeat with an outdated term, it currently assumes leadership failure and starts a new election. Is that viable since it could be a Hb from a leader from one of past terms. 
 
+- If a leader or candidate receives a message with a higher term:
+  - Explicitly reset state variables, including:
+    ```
+    current_term := term
+    role := Follower
+    voted_for := null
+    votes_received := [0, 0, ..., 0]  
+    inbox := null
+    ```
 
 
 ## Note 2 
