@@ -1,0 +1,19 @@
+@!@!@STARTMSG 2262:0 @!@!@
+TLC2 Version 2.16 of 31 December 2020 (rev: cdddf55)
+@!@!@ENDMSG 2262 @!@!@
+@!@!@STARTMSG 2187:0 @!@!@
+Running breadth-first search Model-Checking with fp 104 and seed -7098023602606976969 with 1 worker on 4 cores with 1632MB heap and 64MB offheap memory [pid: 863100] (Linux 6.13.8-arch1-1 amd64, Arch Linux 24.0.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+@!@!@ENDMSG 2187 @!@!@
+@!@!@STARTMSG 1000:1 @!@!@
+TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a tlc2.tool.ConfigFileException
+: @!@!@STARTMSG 5006:0 @!@!@
+TLC found an error in the configuration file at line 18
+It was expecting = or <-, but did not find it.
+@!@!@ENDMSG 5006 @!@!@
+@!@!@ENDMSG 1000 @!@!@
+@!@!@STARTMSG 2186:0 @!@!@
+Finished in 577ms at (2025-04-01 02:20:55)
+@!@!@ENDMSG 2186 @!@!@

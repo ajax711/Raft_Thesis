@@ -468,4 +468,5 @@ Next == /\ \/ \E i \in Server : Restart(i)
 \* to Next.
 Spec == Init /\ [][Next]_vars
 
+\* Safety property: at most one leader per term
 ===============================================================================
